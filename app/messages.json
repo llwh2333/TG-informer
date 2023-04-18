@@ -1,0 +1,9 @@
+{
+    "messages":[
+        {
+            "channel_id": "1000000000001",
+            "message_data": "the first message",
+            "sender_id":"nobody_send"
+        }
+    ]
+}
