@@ -400,28 +400,11 @@ class TGInformer:
     def send_notification(self,channel_info):
         pass
 
-
-    async def init_monitor_channels(self):
+    def join_channel(self):
         """ 
-        初始化要监控的频道
+        根据数据库中的 channel 信息进行加入
         """ 
-        logging.info('Running the monitor to channels')
-
-
-        ###################
-        # 处理消息收集挑战 #
-        ###################
-
-        # 使用装饰器，表示当接收到了新消息时，将调用定义的函数
-        @self.client.on(events.NewMessage)
-        async def message_event_handler(event):
-            #logging.info('!!!!!!!!!!!Get a message')
-            # 通过协程存储当前的新消息
-            await self.message_dump(event)
-
-        ################################
-        # 处理数据库中等待加入的 channel #
-        ################################
+        # 由于自动加入问题较多暂时不用实现，下面的是以前修改好的
 
         #记录现在已经加入的 channel
         current_channels = []
@@ -505,101 +488,48 @@ class TGInformer:
                     self.send_notification(channel['channel_url'])
                     # 删除这个 channel 的数据库信息 todo：
 
-            # 
-            elif(channel['channel_url'] and '/joinchat/' not in channel['channel_url']):
-                # 如果是 group
-                if(sql_channel_id):
+        pass
 
-                    pass
-                # 如果是 channel
-                elif (sql_channel_id):
-                    try:
-                        channel_entity = await self.client.get_entity(channel['channel_url'])
-                        await self.client.JoinChannelRequest(channel_entity)
-                        sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                        logging.info(f'sleeping for {sec} seconds')
-                        await asyncio.sleep(sec)
-                    except ValueError as e:
-                        logging.info(f"failed to get entity for {channel['channel_id']}")
-                    except FloodWaitError as e:
-                        logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                        await asyncio.sleep(e.seconds * 2)
-                    except ChannelInvalidError as e:
-                        logging.info(f'the channel object is invalid {channel["channel_url"]} .')
-                    except ChannelPrivateError as e:
-                        logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                        channel['channel_is_private'] = True
-                    except ChannelsTooMuchError as e:
-                        logging.info('You have joined too many channels/supergroups.')
+    async def init_monitor_channels(self):
+        """ 
+        初始化要监控的频道
+        """ 
+        logging.info('Running the monitor to channels')
 
-                else:
-                    pass
+        # 处理新消息
+        @self.client.on(events.NewMessage)
+        async def message_event_handler(event):
+            #logging.info('!!!!!!!!!!!Get a message')
+            # 通过协程存储当前的新消息
+            await self.message_dump(event)
 
+        #join_channel()
 
-
-
-            # 如果 channel 不是群组，非私人，且不在正在监控频道中
-if channel['channel_is_group'] is False and channel_is_private is False and channel['channel_id'] not in current_channels:
-                logging.info(f"{sys._getframe().f_code.co_name}: Joining channel: {channel['channel_id']} => {channel['channel_name']}")
-                try:
-                    # 根据 url 加入 channel
-                    await self.client(JoinChannelRequest
-                    (channel=await self.client.get_entity(channel['channel_url'])))
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    # Lets wait twice as long as the API tells us for posterity
-                    await asyncio.sleep(e.seconds * 2)
-
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    channel['channel_is_enabled'] = False
-
-
-
-            if channel['channel_id']:
-                try:
-                    entity = self.client.get_entity(channel['channel_id'])
-                except ValueError as e:
-                    logging.info(f"failed to get entity for {channel['channel_id']}")
-
-                try:
-                    self.client.send_message(entity,"/join")
-                except Exception as e:
-                    logging.info(f"failed to join chat for {channel['channel_id']}")
-
-                pass
-            else:
-                if (channel['channel_url']):
-                    pass
-                else:
-                    pass
-                pass
         # 更新频道信息，同时对数据库中 channel 信息进行清理
         for dialog in self.client.iter_dialogs():
             channel_id = dialog.id
             channel_obj = self.session.query(Channel).filter_by(channel_id=channel_id, account_id=self.account.account_id).first()
             
             # 更新数据库
-            if isinstance(dialog.entity, Channel):
+            if dialog.is_channel:
 
                 channel_obj.channel_id = channel_id
                 channel_obj.channel_name = dialog.name
                 channel_obj.channel_title = dialog.title
                 channel_obj.account_id = self.account.account_id
-                channel_obj.channel_is_mega_group = 
                 channel_obj.channel_is_group = dialog.is_group
-                channel_obj.channel_is_private = 
-                channel_obj.channel_is_broadcast = dialog.is_channel
-                channel_obj.channel_access_hash = dialog.entity.
-                channel_obj.channel_size = 
-                channel_obj.channel_is_enabled = 
+                channel_obj.channel_is_broadcast = True
+                channel_obj.channel_is_enabled = True
+                channel_obj.channel_is_mega_group = dialog.megagroup
+                channel_obj.channel_access_hash = dialog.entity.access_hash
+                channel_obj.channel_size = dialog.entity.participants_count
+
                 channel_obj.channel_tcreate = 
 
-            elif ()
+                channel_obj.channel_is_private = 
+
+
+            elif dialog.is_group:
             
             
             
@@ -612,62 +542,6 @@ if channel['channel_is_group'] is False and channel_is_private is False and chan
         # 处理我们账户中的用户信息收集挑战 #
         #################################
 
-
-        if channel['channel_url'] and '/joinchat/' not in channel['channel_url']:
-
-
-            # 如果 channel 不是群组，非私人，且不在正在监控频道中
-if channel['channel_is_group'] is False and channel_is_private is False and 
-channel['channel_id'] not in current_channels:
-                logging.info(f"{sys._getframe().f_code.co_name}: Joining channel: {channel['channel_id']} => {channel['channel_name']}")
-                try:
-                    # 根据 url 加入 channel
-                    await self.client(JoinChannelRequest(channel=await self.client.get_entity(channel['channel_url'])))
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    # Lets wait twice as long as the API tells us for posterity
-                    await asyncio.sleep(e.seconds * 2)
-
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    channel['channel_is_enabled'] = False
-            # 如果 channel 是私人，且不在监控中
-            elif channel_is_private and channel['channel_id'] not in current_channels:
-                channel_obj.channel_is_private = True
-                logging.info(f"{sys._getframe().f_code.co_name}: Joining private channel: {channel['channel_id']} => {channel['channel_name']}")
-
-                #获得 channel 的 secret hash
-                if channel['channel_url'] == None:
-                    continue
-                channel_hash = channel['channel_url'].replace('https://t.me/joinchat/', '')
-
-                try:
-                    # 导入并加入指定哈希值的聊天组
-                    await self.client(ImportChatInviteRequest(hash=channel_hash))
-
-
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-                # 如果发生了 floodwaiterror（请求太频繁）
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    await asyncio.sleep(e.seconds * 2)
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    channel['channel_is_enabled'] = False
-
-                # 已经加入了所以跳过
-                except UserAlreadyParticipantError as e:
-                    logging.info('Already in channel, skipping')
-                    self.session.close()
-                    continue
-
-        
 
 
         channel_obj = self.session.query(Channel).filter_by(channel_id=channel['channel_id'], account_id=self.account.account_id).first()
