@@ -111,8 +111,6 @@ class TGInformer:
         self.loop.run_until_complete(self.bot_interval())
         logging.info('the monitor will done?????')
 
-
-
     def get_channel_all_users(self, channel_id):
         """ 
         获得 channel 的所有用户信息(todo!!!!!!!!)
@@ -138,7 +136,6 @@ class TGInformer:
         data = await self.client.get_entity(PeerChannel(-channel))
         users = await self.client.get_participants(data)
         return users.total
-
         pass
 
     async def get_channel_info_by_url(self,url):
@@ -392,10 +389,8 @@ class TGInformer:
 
         pass
 
-
-
-
-    def delate_channel_from_sql(self,channel)
+    def delate_channel_from_sql(self,channel):
+        pass
 
     def send_notification(self,channel_info):
         pass
@@ -721,11 +716,6 @@ class TGInformer:
         logging.info(f'Channel METADATA: {self.channel_meta}')
         pass
 
-
-
-
-
-
     def channel_count(self):
         """ 
         统计当前账户中的 channel 的数量
@@ -796,5 +786,3 @@ class TGInformer:
             # await self.init_keywords()
             self.channel_count()
             await asyncio.sleep(self.CHANNEL_REFRESH_WAIT)
-    pass
-
