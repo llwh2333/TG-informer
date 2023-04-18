@@ -501,12 +501,13 @@ class TGInformer:
         #join_channel()
 
         # 更新频道信息，同时对数据库中 channel 信息进行清理
+        self.session = self.Session()
         for dialog in self.client.iter_dialogs():
             channel_id = dialog.id
             channel_obj = self.session.query(Channel).filter_by(channel_id=channel_id, account_id=self.account.account_id).first()
             
             # 更新数据库
-            if dialog.is_channel:
+            if dialog.is_broadcast:
 
                 channel_obj.channel_id = channel_id
                 channel_obj.channel_name = dialog.name
@@ -515,195 +516,38 @@ class TGInformer:
                 channel_obj.channel_is_group = dialog.is_group
                 channel_obj.channel_is_broadcast = True
                 channel_obj.channel_is_enabled = True
-                channel_obj.channel_is_mega_group = dialog.megagroup
-                channel_obj.channel_access_hash = dialog.entity.access_hash
+
+                channel_obj.channel_is_mega_group = dialog.megagroup if dialog.megagroup else None
+                channel_obj.channel_access_hash = dialog.entity.access_hash if dialog.entity.access_hash else None
                 channel_obj.channel_size = dialog.entity.participants_count
-
-                channel_obj.channel_tcreate = 
-
-                channel_obj.channel_is_private = 
-
+                full_channel = client(functions.channels.GetFullChannelRequest(channel=channel))
+                channel_obj.channel_tcreate = full_channel.full_chat.date
+                channel_obj.channel_is_private = True if dialog.entity.access_hash in channel_obj['channel_url'] else False
 
             elif dialog.is_group:
-            
-            
-            
-            
+                channel_obj.channel_id = channel_id
+                channel_obj.channel_name = dialog.name
+                channel_obj.channel_title = dialog.title
+                channel_obj.account_id = self.account.account_id
+                channel_obj.channel_is_group = True
+                channel_obj.channel_is_enabled = True
+                channel_obj.channel_is_broadcast = dialog.is_broadcast
+                channel_obj.channel_is_mega_group = dialog.megagroup if dialog.megagroup else None
+                channel_obj.channel_access_hash = dialog.entity.access_hash if dialog.entity.access_hash else None
+                channel_obj.channel_size = dialog.entity.participants_count
+
+                full_channel = client(functions.channels.GetFullChannelRequest(channel=channel))
+                channel_obj.channel_tcreate = full_channel.full_chat.date
+                channel_obj.channel_is_private = True if dialog.entity.access_hash in channel_obj['channel_url'] else False
+
+        # 如果错误，就回滚
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+        except InterfaceError:
             pass
-
-        # 
-
-        #################################
-        # 处理我们账户中的用户信息收集挑战 #
-        #################################
-
-
-
-        channel_obj = self.session.query(Channel).filter_by(channel_id=channel['channel_id'], account_id=self.account.account_id).first()
-
-        #self.account.account_id
-        logging.info(f'{sys._getframe().f_code.co_name}: ### Current channels {json.dumps(current_channels, indent=4)}')
-        
-        ########## 获取数据库中的想监控的 channel
-        # 获取数据库引擎
-        self.session = self.Session()
-        # 获取数据库中的第一个傀儡账户
-        account = self.session.query(Account).first()
-        logging.info('get the sql account')
-        # 获取数据库中傀儡账户需要监控的所有 channel
-        monitors = self.session.query(Monitor).filter_by(account_id=account.account_id).all()
-        # 建立欲监控列表
-        channels_to_monitor = []
-        # 遍历数据库中需要监控的 channel 
-        for monitor in monitors:
-            channel_data = {
-                'channel_id': monitor.channel.channel_id,
-                'channel_name': monitor.channel.channel_name,
-                'channel_title': monitor.channel.channel_title,
-                'channel_url': monitor.channel.channel_url,
-                'account_id': monitor.channel.account_id,
-                'channel_is_megagroup': monitor.channel.channel_is_mega_group,
-                'channel_is_group': monitor.channel.channel_is_group,
-                'channel_is_private': monitor.channel.channel_is_private,
-                'channel_is_broadcast': monitor.channel.channel_is_broadcast,
-                'channel_access_hash': monitor.channel.channel_access_hash,
-                'channel_size': monitor.channel.channel_size,
-                'channel_is_enabled': monitor.channel.channel_is_enabled,
-                'channel_tcreate': monitor.channel.channel_tcreate
-            }
-            # 如果频道是需要监控的，则添加到列表中
-            if monitor.channel.channel_is_enabled is True:
-                logging.info('channels_to_monitor append one !!!')
-                channels_to_monitor.append(channel_data)
         self.session.close()
-        ########## 测试欲监控的 channel
-        # 遍历欲监控 channel 列表
-        for channel in channels_to_monitor:
-            # 获取数据库引擎
-            self.session = self.Session()
-            # 获得当前数据库中欲监控的对象，对其的修改会改变数据库的内容
-            channel_obj = self.session.query(Channel).filter_by(channel_id=channel['channel_id']).first()
-            
-            # 如果欲监控列表中包含 channel ID
-            if channel['channel_id']:
-                # 列入实际成功监控的 channel 目录中
-                self.channel_list.append(channel['channel_id'])
-                logging.info(f"Adding channel {channel['channel_name']} to monitoring w/ ID: {channel['channel_id']} hash: {channel['channel_access_hash']}")
-                # 填入成功监控 channel 的信息
-                self.channel_meta[channel['channel_id']] = {
-                    'channel_id': channel['channel_id'],
-                    'channel_title': channel['channel_title'],
-                    'channel_url': channel['channel_url'],
-                    'channel_size': 0,
-                    'channel_texpire': datetime.now() + timedelta(hours=3)
-                }
-            # 如果没有 channel ID，就获取信息
-            else:
-                logging.info('test get channel info')
-                # 如果有 url 字段并且非公共 channel（可能需要验证），获取频道信息
-                if channel['channel_url'] and '/joinchat/' not in channel['channel_url']:
-                    logging.info('from url(no joinchat) get info')
-                    o = await self.get_channel_info_by_url(channel['channel_url'])
-
-                    # 如果 channel 是无效的，跳过这个 channel
-                    if o is False:
-                        logging.info('false get channel info')
-                        logging.error(f"Invalid channel URL: {channel['channel_url']}")
-                        continue
-
-                    logging.info(f"{sys._getframe().f_code.co_name}: ### Successfully identified {channel['channel_name']}")
-
-
-                # 如果 channel 是群组
-                elif channel['channel_url'] and '/joinchat/' in channel['channel_url']:
-                    o = await self.get_channel_info_by_channel_url(channel['channel_url'])
-
-                    logging.info(f"{sys._getframe().f_code.co_name}: ### Successfully identified {channel['channel_name']}")
-                
-                # 如果都不知道，就解析失败，跳过
-                else:
-                    logging.info(f"{sys._getframe().f_code.co_name}: Unable to indentify channel {channel['channel_name']}")
-                    continue
-
-                # 对欲监控 channel 信息进行填充
-                channel_obj.channel_id = o['channel_id']
-                channel_obj.channel_title = o['channel_title']
-                channel_obj.channel_is_broadcast = o['is_broadcast']
-                channel_obj.channel_is_mega_group = o['is_mega_group']
-                channel_obj.channel_access_hash = o['channel_access_hash']
-
-                # 填充 channel 元数据
-                self.channel_meta[o['channel_id']] = {
-                    'channel_id': o['channel_id'],
-                    'channel_title': o['channel_title'],
-                    'channel_url': channel['channel_url'],
-                    'channel_size': 0,
-                    'channel_texpire':datetime.now() + timedelta(hours=3)
-                }
-    
-            # 确定是否是私人 channel
-            channel_is_private = True if (channel['channel_is_private'] or '/joinchat/' in channel['channel_url']) else False
-            if channel_is_private:
-                logging.info(f'channel_is_private: {channel_is_private}')
-
-            # 如果 channel 不是群组，非私人，且不在正在监控频道中
-            if channel['channel_is_group'] is False and channel_is_private is False and channel['channel_id'] not in current_channels:
-                logging.info(f"{sys._getframe().f_code.co_name}: Joining channel: {channel['channel_id']} => {channel['channel_name']}")
-                try:
-                    # 根据 url 加入 channel
-                    await self.client(JoinChannelRequest(channel=await self.client.get_entity(channel['channel_url'])))
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    # Lets wait twice as long as the API tells us for posterity
-                    await asyncio.sleep(e.seconds * 2)
-
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    channel['channel_is_enabled'] = False
-            # 如果 channel 是私人，且不在监控中
-            elif channel_is_private and channel['channel_id'] not in current_channels:
-                channel_obj.channel_is_private = True
-                logging.info(f"{sys._getframe().f_code.co_name}: Joining private channel: {channel['channel_id']} => {channel['channel_name']}")
-
-                #获得 channel 的 secret hash
-                if channel['channel_url'] == None:
-                    continue
-                channel_hash = channel['channel_url'].replace('https://t.me/joinchat/', '')
-
-                try:
-                    # 导入并加入指定哈希值的聊天组
-                    await self.client(ImportChatInviteRequest(hash=channel_hash))
-
-
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-                # 如果发生了 floodwaiterror（请求太频繁）
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    await asyncio.sleep(e.seconds * 2)
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    channel['channel_is_enabled'] = False
-
-                # 已经加入了所以跳过
-                except UserAlreadyParticipantError as e:
-                    logging.info('Already in channel, skipping')
-                    self.session.close()
-                    continue
-
-            # 如果被欺骗了，就回滚
-            try:
-                self.session.commit()
-            except IntegrityError:
-                self.session.rollback()
-            except InterfaceError:
-                pass
-            self.session.close()
 
 
 
