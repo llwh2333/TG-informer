@@ -54,10 +54,7 @@ class TGInformer:
         tg_account_id = os.environ['TELEGRAM_ACCOUNT_ID'],
         tg_notifications_channel_id = os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
         tg_phone_number = os.environ['TELEGRAM_ACCOUNT_PHONE_NUMBER']
-    ):
-
-        """ 
-        """ 
+        ): 
 
         # 实例变量
         self.channel_list = []
@@ -113,47 +110,61 @@ class TGInformer:
 
     def check_channel_in_sql(self):
         """ 
-        检查会话与数据库中channel 的是否对应，过去加入，现在离开的 channel 的 is_enabled 改为 none
+        TODO:检查会话与数据库中channel 的是否对应，过去加入，现在离开的 channel 的 is_enabled 改为 none
         """ 
         pass
 
     def dump_channel_user_info(self,dialog):
         """ 
-        将会话的所有成员的信息存储下来
+        TODO:将会话的所有成员的信息存储下来
         """ 
         pass
 
     def flush_channel_info_in_sql(self,channel_info):
         """ 
-        更新数据库中对应频道的信息，如果没有，创建相应一个条目
+        TODO:更新数据库中对应频道的信息，如果没有，创建相应一个条目
         """ 
         pass
 
     def join_channel(self):
         """ 
-        根据数据库中未加入的频道信息，加入频道
+        TODO:根据数据库中未加入的频道信息，加入频道
         """ 
         pass
 
-    def store_in_sql(self,e):
+    def store_message_in_sql(self,message_info):
+        """
+        TODO:将获得的消息信息存储进入 sql 中
+        """
         pass
 
-    def store_in_json_file(self,message_info):
+    def store_message_in_json_file(self,message_info):
+        """
+        将获得的消息信息，存入json 文件中
+        """
         lock = threading.Lock()
-
+        now = datetime.now()
+        file_data =  now.strftime("%d_%m_%y")
+        
+        json_file_name = file_data+'_messages.json'
         with lock:    
             logging.info('begin store message')
-            with open('messages.json','r') as f:
+            with open(json_file_name,'r') as f:
                 data = json.load(f)
             new_message = {'channel_id':str(channel_id),'message_data':message,'sender_id':str(event.sender_id)}
             data['messages'].append(new_message)
             json_data = json.dumps(data,indent = 4)
-            with open('messages.json','w') as f:
+            with open(json_file_name,'w') as f:
                 f.write(json_data)
             logging.info('end store message')
 
     def get_channel_user_count(self,channel_id):
-        pass
+        """ 
+        获得 channel 的用户人数
+        """ 
+        data = await self.client.get_entity(PeerChannel(-channel))
+        users = await self.client.get_participants(data)
+        return users.total
 
     def get_message_info_from_event(self,event):
         """ 
@@ -187,7 +198,7 @@ class TGInformer:
             mention_user_id = None
         else:
             is_mention = True
-            user_entities = await client.get_entity(mentioned_users)
+            user_entities = await self.client.get_entity(mentioned_users)
             mention_id = []
             for entity in user_entities:
                 mention_id.append(entity.id)
@@ -204,10 +215,15 @@ class TGInformer:
             fwd_message_date = None
 
         is_reply = False if message_obj.reply_to_msg_id is None else True
+
+        reply_obj = await event.get_reply_message()
+        reply_message_txt = reply_obj.message
+        reply_message_seed_id = reply_obj.sender
+        reply_message_date = reply_obj.date
         if is_reply:
-            reply_message_txt = 
-            reply_message_seed_id = 
-            reply_message_date = 
+            reply_message_txt = reply_message_txt
+            reply_message_seed_id = reply_message_seed_id
+            reply_message_date = reply_message_date
         else:
             reply_message_txt = None
             reply_message_seed_id = None
@@ -216,7 +232,7 @@ class TGInformer:
         if channel_id in self.channel_list:
             channel_size = self.channel_meta[channel_id]['channel_size']
         else :
-            channel_size = await self.get_channel_user_count(channel_id)
+            channel_size = self.get_channel_user_count(channel_id)
 
         message_info = {
             'message_id':event.message_id,
@@ -224,22 +240,22 @@ class TGInformer:
             'account_id':self.account.account_id,                               # 傀儡账户 id
             'channel_id':channel_id,                                            # 频道的 id
             'message_text':event.raw_text,                                      # 消息内容
-            'message_is_mention':is_mention                                  # 是否提及他人
-            'message_mentioned_user_id':mention_user_id
-            'message_is_scheduled':message_obj.from_scheduled                                   # 是否预设发送
-            'message_is_fwd':is_fwd                                   # 是否转发消息
-            'fwd_message_txt'::fwd_message_txt 
-            'fwd_message_seed_id':fwd_message_seed_id 
-            'fwd_message_date':fwd_message_date 
-            'message_is_reply':is_reply                                        # 是否是回复
-            'reply_message_txt':reply_message_txt 
-            'reply_message_seed_id':reply_message_seed_id 
-            'reply_message_date':reply_message_date
-            'message_is_bot':is_bot                                          # 是否机器人发出
-            'message_is_group':is_group
-            'message_is_private':is_private
-            'message_is_channel':is_channel 
-            'message_channel_size':channel_size
+            'message_is_mention':is_mention,                                  # 是否提及他人
+            'message_mentioned_user_id':mention_user_id,
+            'message_is_scheduled':message_obj.from_scheduled,                                   # 是否预设发送
+            'message_is_fwd':is_fwd,                                   # 是否转发消息
+            'fwd_message_txt'::fwd_message_txt ,
+            'fwd_message_seed_id':fwd_message_seed_id, 
+            'fwd_message_date':fwd_message_date ,
+            'message_is_reply':is_reply,                                        # 是否是回复
+            'reply_message_txt':reply_message_txt ,
+            'reply_message_seed_id':reply_message_seed_id, 
+            'reply_message_date':reply_message_date,
+            'message_is_bot':is_bot,                                          # 是否机器人发出
+            'message_is_group':is_group,
+            'message_is_private':is_private,
+            'message_is_channel':is_channel ,
+            'message_channel_size':channel_size,
             'message_tcreate':datetime.now()
             }
 
@@ -285,8 +301,8 @@ class TGInformer:
             # 两者均不是，跳过
             return
         e = self.get_message_info_from_event(event)
-        self.store_in_json_file(e)
-        self.store_in_sql(e)
+        self.store_message_in_json_file(e)
+        self.store_message_in_sql(e)
 
     def stop_bot_interval(self):
         self.bot_task.cancel()
@@ -422,16 +438,6 @@ class TGInformer:
         for user in users:
             if user.username is not None and not user.is_self:
                 print(utils.get_display_name(user), user.username, user.id, user.bot, user.verified, user.restricted, user.first_name, user.last_name, user.phone, user.is_self)
-
-
-    async def get_channel_user_count(self, channel):
-        """ 
-        获得 channel 的用户人数
-        """ 
-        data = await self.client.get_entity(PeerChannel(-channel))
-        users = await self.client.get_participants(data)
-        return users.total
-        pass
 
     async def get_channel_info_by_url(self,url):
         """ 
