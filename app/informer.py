@@ -19,7 +19,7 @@ from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, Us
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from oauth2client.service_account import ServiceAccountCredentials
-from models import Account, Channel, ChatUser, Keyword, Message, Monitor, Notification
+from models import Account, Channel, ChatUser, Message
 import threading
 import json
 
@@ -67,7 +67,6 @@ class TGInformer:
         self.CHANNEL_REFRESH_WAIT = 15 * 60 # Every 15 minutes
         self.MIN_CHANNEL_JOIN_WAIT = 30
         self.MAX_CHANNEL_JOIN_WAIT = 120
-        self.bot_uptime = 0
         self.client = None
         self.loop = asyncio.get_event_loop()
 
@@ -108,8 +107,306 @@ class TGInformer:
             raise Exception(f'Invalid account_id {tg_account_id} for bot instance')
 
         # 执行协程，即开始我们的监控
+        self.session.close()
         self.loop.run_until_complete(self.bot_interval())
         logging.info('the monitor will done?????')
+
+    def check_channel_in_sql(self):
+        """ 
+        检查会话与数据库中channel 的是否对应，过去加入，现在离开的 channel 的 is_enabled 改为 none
+        """ 
+        pass
+
+    def dump_channel_user_info(self,dialog):
+        """ 
+        将会话的所有成员的信息存储下来
+        """ 
+        pass
+
+    def flush_channel_info_in_sql(self,channel_info):
+        """ 
+        更新数据库中对应频道的信息，如果没有，创建相应一个条目
+        """ 
+        pass
+
+    def join_channel(self):
+        """ 
+        根据数据库中未加入的频道信息，加入频道
+        """ 
+        pass
+
+    def store_in_sql(self,e):
+        pass
+
+    def store_in_json_file(self,message_info):
+        lock = threading.Lock()
+
+        with lock:    
+            logging.info('begin store message')
+            with open('messages.json','r') as f:
+                data = json.load(f)
+            new_message = {'channel_id':str(channel_id),'message_data':message,'sender_id':str(event.sender_id)}
+            data['messages'].append(new_message)
+            json_data = json.dumps(data,indent = 4)
+            with open('messages.json','w') as f:
+                f.write(json_data)
+            logging.info('end store message')
+
+    def get_channel_user_count(self,channel_id):
+        pass
+
+    def get_message_info_from_event(self,event):
+        """ 
+        从 event 中获得需要的 info
+        """ 
+        message_obj = event.message
+        if isinstance(message_obj.to_id, PeerChannel):
+            channel_id = message_obj.to_id.channel_id
+            is_channel = True
+            is_group = False
+            is_private = False
+        elif isinstance(message_obj.to_id, PeerChat):
+            channel_id = message_obj.chat_id
+            is_channel = False
+            is_group = True
+            is_private = False
+        else:
+            is_channel = False
+            is_group = False
+            is_private = False
+
+        is_bot = False if message_obj.via_bot_id is None else True
+
+        entities = message_obj.entities
+        mentioned_users = []
+        for entity in entities:
+            if entity.type == 'Mention':
+                mentioned_users.append(entity.get_input_string())
+        if mentioned_users == []:
+            is_mention = False
+            mention_user_id = None
+        else:
+            is_mention = True
+            user_entities = await client.get_entity(mentioned_users)
+            mention_id = []
+            for entity in user_entities:
+                mention_id.append(entity.id)
+            mention_user_id = mention_id[0]
+
+        is_fwd = False if message_obj.fwd_from is None else True
+        if is_fwd:
+            fwd_message_txt = message_obj.fwd_from.data
+            fwd_message_seed_id = message_obj.fwd_from.from_id
+            fwd_message_date = None
+        else:
+            fwd_message_txt = None
+            fwd_message_seed_id = None
+            fwd_message_date = None
+
+        is_reply = False if message_obj.reply_to_msg_id is None else True
+        if is_reply:
+            reply_message_txt = 
+            reply_message_seed_id = 
+            reply_message_date = 
+        else:
+            reply_message_txt = None
+            reply_message_seed_id = None
+            reply_message_date = None
+
+        if channel_id in self.channel_list:
+            channel_size = self.channel_meta[channel_id]['channel_size']
+        else :
+            channel_size = await self.get_channel_user_count(channel_id)
+
+        message_info = {
+            'message_id':event.message_id,
+            'chat_user_id':event.sender_id,
+            'account_id':self.account.account_id,                               # 傀儡账户 id
+            'channel_id':channel_id,                                            # 频道的 id
+            'message_text':event.raw_text,                                      # 消息内容
+            'message_is_mention':is_mention                                  # 是否提及他人
+            'message_mentioned_user_id':mention_user_id
+            'message_is_scheduled':message_obj.from_scheduled                                   # 是否预设发送
+            'message_is_fwd':is_fwd                                   # 是否转发消息
+            'fwd_message_txt'::fwd_message_txt 
+            'fwd_message_seed_id':fwd_message_seed_id 
+            'fwd_message_date':fwd_message_date 
+            'message_is_reply':is_reply                                        # 是否是回复
+            'reply_message_txt':reply_message_txt 
+            'reply_message_seed_id':reply_message_seed_id 
+            'reply_message_date':reply_message_date
+            'message_is_bot':is_bot                                          # 是否机器人发出
+            'message_is_group':is_group
+            'message_is_private':is_private
+            'message_is_channel':is_channel 
+            'message_channel_size':channel_size
+            'message_tcreate':datetime.now()
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        #
+
+
+        pass
+
+    async def message_dump(self,event):
+        """ 
+        将收到的消息进行存储，存储到数据库和 json 文件中
+        """ 
+        message = event.raw_text
+
+        if isinstance(event.message.to_id, PeerChannel):
+            channel_id = event.message.to_id.channel_id
+            if channel_id == self.monitor_channel:
+                logging.info(f'the message is from monitor channel')
+                return
+            logging.info(f'........get the channel message is ({message})!!!!!!!!!!!!!!!')
+        # 如果是群组，获得群组的 id
+        elif isinstance(event.message.to_id, PeerChat):
+            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
+            flag = 0
+            channel_id = event.message.chat_id
+        else:
+            # 两者均不是，跳过
+            return
+        e = self.get_message_info_from_event(event)
+        self.store_in_json_file(e)
+        self.store_in_sql(e)
+
+    def stop_bot_interval(self):
+        self.bot_task.cancel()
+
+    async def init_monitor_channels(self):
+        """ 
+        初始化要监控的频道
+        """ 
+        logging.info('Running the monitor to channels')
+
+        # 处理新消息
+        @self.client.on(events.NewMessage)
+        async def message_event_handler(event):
+            #logging.info('!!!!!!!!!!!Get a message')
+            # 通过协程存储当前的新消息
+            await self.message_dump(event)
+
+        #join_channel()
+
+        for dialog in self.client.iter_dialogs():
+            e = self.get_channel_info_by_dialog(dialog)
+            self.channel_list.append(e['channel_id'])
+
+            self.channel_meta[e['channel_id']] = {
+               'channel_id': e['channel_id'],
+               'channel_title': e['channel_title'],
+               'channel_url': e['channel_url'],
+               'channel_size': e['channel_size'],
+               'channel_texpire': datetime.now() + timedelta(hours=3)
+            }
+
+            self.flush_channel_info_in_sql(e)
+
+            self.dump_channel_user_info(dialog)
+
+        self.check_channel_in_sql()
+
+        """ 
+        TODO:对于产生的成员变动的信息更新处理
+        """ 
+
+        logging.info(f"{sys._getframe().f_code.co_name}: Monitoring channels: {json.dumps(self.channel_list, indent=4)}")
+        logging.info(f'Channel METADATA: {self.channel_meta}')
+
+    def channel_count(self):
+        """ 
+        统计当前账户中的 channel 的数量
+        """
+        count = 0
+        channel_list = []
+
+        for dialog in self.client.iter_dialogs():
+            # 会话的 channel id
+            channel_id = dialog.id
+
+            # 会话不能是用户间的对话
+            if not dialog.is_user:
+                # 如果 channel id 是正整数，则去除前三位，取正整数channel id
+                if str(abs(channel_id))[:3] == '100':
+                    channel_id = int(str(abs(channel_id))[3:])
+                # 将 channel 加入现在可监控的 channel 列表
+                channel_list.append({
+                    'id':count,
+                    'channel id':channel_id,
+                    'channel name':dialog.name
+                    })
+                logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
+
+        logging.info(f'Count:{count}')
+        pass
+
+    async def bot_interval(self):
+        """ 
+        根据当前的配置建立会话，并保存 session ，方便下一次登录
+        """ 
+
+        logging.info(f'Logging in with account # {self.account.account_phone} ... \n')
+
+        # 用来存储会话文件的地址，方便下一次的会话连接
+        #session_file = self.account.account_phone.replace('+', '' )+'.session'
+        logging.info('bot_name is the path')
+
+        # 实例化一个 tg 端对象，初次登录会记录指定路径中，后续登录会直接使用以前的账户信息
+        self.client = TelegramClient('bot_name', self.account.account_api_id, self.account.account_api_hash)
+
+        # 异步的启动这个实例化的 tg 客户端对象，其中手机号为配置文件中的手机号
+        await self.client.start(phone=f'{self.account.account_phone}')
+
+        # 检查当前用户是否已经授权使用 API
+        if not await self.client.is_user_authorized():
+            logging.info(f'Client is currently not logged in, please sign in! Sending request code to {self.account.account_phone}, please confirm on your mobile device')
+            
+            # 当发现没有授权时，向手机号发送验证码
+            await self.client.send_code_request(self.account.account_phone)
+            self.tg_user = await self.client.sign_in(self.account.account_phone, input('Enter code: '))
+        
+        #获取当前的傀儡账户信息
+        self.tg_user = await self.client.get_me()
+
+        # 统计 channel 数量和初始化监控频道
+        # await self.init_keywords()
+        self.channel_count()
+        await self.init_monitor_channels()
+        
+
+        # 循环重置敏感字列表
+        count = 0
+        while True:
+            count +=1
+            logging.info(f'### {count} Running bot interval')
+
+            # await self.init_keywords()
+            self.channel_count()
+            await asyncio.sleep(self.CHANNEL_REFRESH_WAIT)
+
+
+
+
+
+
 
     def get_channel_all_users(self, channel_id):
         """ 
@@ -126,8 +423,6 @@ class TGInformer:
             if user.username is not None and not user.is_self:
                 print(utils.get_display_name(user), user.username, user.id, user.bot, user.verified, user.restricted, user.first_name, user.last_name, user.phone, user.is_self)
 
-    def stop_bot_interval(self):
-        self.bot_task.cancel()
 
     async def get_channel_user_count(self, channel):
         """ 
@@ -351,43 +646,6 @@ class TGInformer:
                     )
         pass
 
-    async def message_dump(self,event):
-        """ 
-        将收到的消息进行存储，存储到数据库和 json 文件中
-        """ 
-        flag = -1
-        channel_id = abs(channel_id)
-
-        message = event.raw_text
-
-        if isinstance(event.message.to_id, PeerChannel):
-            logging.info(f'........get the channel message is ({message})!!!!!!!!!!!!!!!')
-            flag = 1
-            channel_id = event.message.to_id.channel_id
-        # 如果是群组，获得群组的 id
-        elif isinstance(event.message.to_id, PeerChat):
-            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
-            flag = 0
-            channel_id = event.message.chat_id
-        else:
-            # 两者均不是，跳过
-            return
-
-        lock = threading.Lock()
-
-
-        with lock:    
-            logging.info('begin store message')
-            with open('messages.json','r') as f:
-                data = json.load(f)
-            new_message = {'channel_id':str(channel_id),'message_data':message,'sender_id':str(event.sender_id)}
-            data['messages'].append(new_message)
-            json_data = json.dumps(data,indent = 4)
-            with open('messages.json','w') as f:
-                f.write(json_data)
-            logging.info('end store message')
-
-        pass
 
     def delate_channel_from_sql(self,channel):
         pass
