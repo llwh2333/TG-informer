@@ -151,7 +151,41 @@ class TGInformer:
             logging.info('begin store message')
             with open(json_file_name,'r') as f:
                 data = json.load(f)
-            new_message = {'channel_id':str(channel_id),'message_data':message,'sender_id':str(event.sender_id)}
+            new_message = {
+                'channel_id':message_info['channel_id'],
+                'message_data':message_info['message_txt'],
+                'sender_id':message_info['chat_user_id'],
+                'is_bot':message_info['message_is_bot'],
+                'is_group':message_info['message_is_group'],
+                'is_private':message_info['message_is_private'],
+                'is_channel':message_info['message_is_channel'],
+                'channel_size':message_info['message_channel_size'],
+                'message_tcreate':message_info['messsage_tcreate'],
+                }
+            if (message_info['message_is_mention']):
+                mention_data = {
+                    'is_mention':message_info['message_is_mention'],
+                    'mentioned_user_id':message_info['message_mention_user_id'],
+                }
+                pass
+            else:
+                pass
+            new_message.update(mention_data)
+            if (message_info['message_is_fwd']):
+                fwd_data{
+                    'is_fwd':message_info['message_is_fwd'],
+                    ''
+
+                }
+                pass
+            else:
+                pass
+            new_message.update(fwd_data)
+            if (message_info['message_is_reply']):
+                pass
+            else:
+                pass
+            new_message.update(reply_data)
             data['messages'].append(new_message)
             json_data = json.dumps(data,indent = 4)
             with open(json_file_name,'w') as f:
@@ -258,27 +292,7 @@ class TGInformer:
             'message_channel_size':channel_size,
             'message_tcreate':datetime.now()
             }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        #
-
-
-        pass
+        return message_info
 
     async def message_dump(self,event):
         """ 
