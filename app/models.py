@@ -74,13 +74,11 @@ class ChatUser(Base):
     chat_user_first_name = Column(String(50), default=None)                         # 参与者昵称
     chat_user_last_name = Column(String(50), default=None)
 
-
     chat_user_is_bot = Column(Boolean(), default=None)                              # 参与者是否为 bot
     chat_user_is_verified = Column(Boolean(), default=None)                         # 参与者是否验证
     chat_user_content = Column(String(1000),default=None)
 
     chat_user_is_restricted = Column(Boolean(), default=None)                       # 是否受限用户
-
 
     chat_user_phone = Column(String(25), default=None)                              # 参与者手机号
     chat_user_tlogin = Column(DateTime, default=None)                               # 登录时间
@@ -108,7 +106,6 @@ class Message(Base):
     fwd_message_txt = Column(String(10000), default=None)
     fwd_message_seed_id = chat_user_id = Column(BigInteger, ForeignKey('chat_user.chat_user_id'), nullable=True)
     fwd_message_date = Column(DateTime, default=None)
-
 
     message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
     reply_message_txt = Column(String(10000), default=None)
