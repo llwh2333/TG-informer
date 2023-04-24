@@ -1,7 +1,6 @@
 from sqlalchemy import Boolean, Column, Integer, String, BigInteger, DateTime, ForeignKey, Table
 from sqlalchemy.orm import relationship
 from datetime import datetime
-
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -55,7 +54,7 @@ class Channel(Base):
     channel_size = Column(Integer, nullable=True)                                       # 频道大小（成员数）
 
     # 在数据库中当 is_enabled 为 False 将被添加，失败将被删除，并发送通知
-    channel_is_enabled = Column(Boolean(), nullable=True, default=False)                # 频道是否启动
+    channel_is_enabled = Column(Boolean(), nullable=True, default=False)
                                 
     channel_tcreate = Column(DateTime, default=datetime.now())                          # 创建时间
 
@@ -76,7 +75,6 @@ class ChatUser(Base):
 
     chat_user_is_bot = Column(Boolean(), default=None)                              # 参与者是否为 bot
     chat_user_is_verified = Column(Boolean(), default=None)                         # 参与者是否验证
-    chat_user_content = Column(String(1000),default=None)
 
     chat_user_is_restricted = Column(Boolean(), default=None)                       # 是否受限用户
 
@@ -86,7 +84,6 @@ class ChatUser(Base):
     chat_user_tmodified = Column(DateTime, default=datetime.now())                  # 最近修改时间
 
     messages = relationship('Message')
-    pass
 
 class Message(Base):
     """ 
@@ -97,6 +94,7 @@ class Message(Base):
     chat_user_id = Column(BigInteger, ForeignKey('chat_user.chat_user_id'), nullable=False) # 消息发送者 id
     account_id = Column(BigInteger, ForeignKey('account.account_id'), nullable=False)       # 傀儡账户 id
     channel_id = Column(BigInteger, ForeignKey('channel.channel_id'), nullable=False)       # 频道的 id
+
     message_text = Column(String(10000), default=None)                                      # 消息内容
     message_is_mention = Column(Boolean(), default=None)                                    # 是否提及他人
     message_mentioned_user_id = Column(BigInteger,ForeignKey('account.account_id'),nullable=True)
@@ -123,17 +121,3 @@ class Message(Base):
     user = relationship('ChatUser', back_populates='messages')
     account = relationship('Account', back_populates='messages')
     channel = relationship('Channel', back_populates='messages')
-    pass
-
-
-
-
-
-
-
-
-""" 
-2987152cbf64
-docker exec -it 2987152cbf64 /bin/bash
-""" 
-
