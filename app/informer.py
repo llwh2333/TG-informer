@@ -468,21 +468,21 @@ class TGInformer:
 
         new_message.update(mention_data)
         if (message_info['message_is_fwd']):
-            fwd_data{
+            fwd_data = {
                 'is_fwd':message_info['message_is_fwd'],
                 'fwd_message_txt':message_info['fwd_message_txt'],
                 'fwd_message_seed_id':message_info['fwd_message_seed_id'],
                 'fwd_message_date':message_info['fwd_message_date']
             }
         else:
-            fwd_data{
+            fwd_data = {
                 'is_fwd':message_info['message_is_fwd'],
             }
         new_message.update(fwd_data)
 
         if (message_info['message_is_reply']):
             reply_data = {
-                'is_reply':message_info['message_is_reply']
+                'is_reply':message_info['message_is_reply'],
                 'reply_message_txt':message_info['reply_message_txt'],
                 'reply_message_seed_id':message_info['reply_message_seed_id'],
                 'reply_message_date':message_info['reply_message_date']
@@ -606,7 +606,7 @@ class TGInformer:
                     'channel id':dialog.id,
                     'channel name':dialog.name
                     })
-                    cout +=1
+                cout +=1
                 logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
         logging.info(f'Count:{count}')
 
