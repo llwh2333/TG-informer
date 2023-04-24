@@ -64,6 +64,9 @@ class TGInformer:
         self.MAX_CHANNEL_JOIN_WAIT = 120
         self.client = None
         self.loop = asyncio.get_event_loop()
+        self.lock_message = threading.Lock()
+        self.lock_channel = threading.Lock()
+        self.lock_chat_user = threading.Lock()
 
         # 展示横幅
         print(banner)
@@ -147,35 +150,14 @@ class TGInformer:
 
     def store_channel_info_in_json_file(self,channel_info):
         """ 
-        TODO:将 channel 信息存储到 json 文件中
+        将 channel 信息存储到 json 文件中
         """ 
         lock = threading.Lock()
         now = datetime.now()
         file_data =  now.strftime("%d_%m_%y")
-        
         json_file_name = file_data+'_channel_info.json'
-        with lock:
-            logging.info('begin store channel info')
-            if not os.path.exists(json_file_name):
-                with open(json_file_name,'w') as f:
-                    init_json = {}
-                    json_first = json.dumps(init_json)
-                    f.write(json_first)
-                    data = json.load(f)
-            else:
-                with open(json_file_name,'r') as f:
-                    data = json.load(f)
-            try : 
-                data[channel_info['account_id']].append(channel_info)
-            except KeyError:
-                data[channel_info['account_id']] = channel_info
-            
-            json_data = json.dumps(data,indent=4)
-            with open(json_file_name,'w') as f :
-                f.write(json_data)
-            logging.info('end store channel info')
 
-        pass
+        self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info)
 
     def store_channel_info_in_sql(self,channel_info):
         """ 
@@ -223,27 +205,11 @@ class TGInformer:
         """ 
         将获得的 user 列表信息存储到本地 json 中
         """ 
-        lock = threading.Lock()
         now = datetime.now()
         file_data =  now.strftime("%d_%m_%y")
-        
         json_file_name = file_data+'_chat_user.json'
-        with lock:
-            logging.info('begin store chat users')
-            if not os.path.exists(json_file_name):
-                with open(json_file_name,'w') as f:
-                    init_json = {}
-                    json_first = json.dumps(init_json)
-                    f.write(json_first)
-                    data = json.load(f)
-            else:
-                with open(json_file_name,'r') as f:
-                    data = json.load(f)
-            data[dialog.name].append(user_info_list)
-            json_data = json.dumps(data,indent=4)
-            with open(json_file_name,'w') as f :
-                f.write(json_data)
-            logging.info('end store chat users')
+
+        self.store_data_in_json_file(json_file_name, self.lock_chat_user, dialog.name,user_info_list)
 
     def store_user_info_in_sql(self,user_info_list,dialog):
         """ 
@@ -348,18 +314,16 @@ class TGInformer:
         """ 
         pass
 
-    def get_message_info_from_event(self,event):
+    def get_message_info_from_event(self,event,channel_id):
         """ 
         从 event 中获得需要的 info
         """ 
         message_obj = event.message
         if isinstance(message_obj.to_id, PeerChannel):
-            channel_id = message_obj.to_id.channel_id
             is_channel = True
             is_group = False
             is_private = False
         elif isinstance(message_obj.to_id, PeerChat):
-            channel_id = message_obj.chat_id
             is_channel = False
             is_group = True
             is_private = False
@@ -370,22 +334,24 @@ class TGInformer:
 
         is_bot = False if message_obj.via_bot_id is None else True
 
-        entities = message_obj.entities
+        
         mentioned_users = []
-        for entity in entities:
-            if entity.type == 'Mention':
-                mentioned_users.append(entity.get_input_string())
+        for ent, txt in event.get_entities_text():
+            if isinstance(ent ,type.MessageEntityMention):
+                mentioned_users.append(txt)
         if mentioned_users == []:
             is_mention = False
             mention_user_id = None
         else:
             is_mention = True
+            """ 
             user_entities = await self.client.get_entity(mentioned_users)
             mention_id = []
             for entity in user_entities:
                 mention_id.append(entity.id)
             mention_user_id = mention_id[0]
-
+            """ 
+            mention_user_id = None
         is_fwd = False if message_obj.fwd_from is None else True
         if is_fwd:
             fwd_message_txt = message_obj.fwd_from.data
@@ -448,84 +414,88 @@ class TGInformer:
         """
         pass
 
-    def store_message_in_json_file(self,message_info):
-        """
-        将获得的消息信息，存入json 文件中
-        """
-        lock = threading.Lock()
-        now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
-        
-        json_file_name = file_data+'_messages.json'
-        with lock:    
-            logging.info('begin store message')
+    def store_data_in_json_file(self,file_name,lock,data_key,data,):
+        """ 
+        打开 json 文件，并将数据存入
+        """ 
+        with lock:
             if not os.path.exists(json_file_name):
-                with open(json_file_name,'w') as f:
-                    init_json = {'message':None}
+                with open(file_name,'w') as f:
+                    init_json ={}
                     json_first = json.dumps(init_json)
                     f.write(json_first)
                     data = json.load(f)
             else:
                 with open(json_file_name,'r') as f:
                     data = json.load(f)
-
-            new_message = {
-                'channel_id':message_info['channel_id'],
-                'message_data':message_info['message_txt'],
-                'sender_id':message_info['chat_user_id'],
-                'is_bot':message_info['message_is_bot'],
-                'is_group':message_info['message_is_group'],
-                'is_private':message_info['message_is_private'],
-                'is_channel':message_info['message_is_channel'],
-                'channel_size':message_info['message_channel_size'],
-                'message_tcreate':message_info['messsage_tcreate'],
-                }
-            if (message_info['message_is_mention']):
-                mention_data = {
-                    'is_mention':message_info['message_is_mention'],
-                    'mentioned_user_id':message_info['message_mention_user_id'],
-                }
-            else:
-                mention_data = {
-                    'is_mention':message_info['message_is_mention']
-                }
-                pass
-            new_message.update(mention_data)
-
-            if (message_info['message_is_fwd']):
-                fwd_data{
-                    'is_fwd':message_info['message_is_fwd'],
-                    'fwd_message_txt':message_info['fwd_message_txt'],
-                    'fwd_message_seed_id':message_info['fwd_message_seed_id'],
-                    'fwd_message_date':message_info['fwd_message_date']
-                }
-            else:
-                fwd_data{
-                    'is_fwd':message_info['message_is_fwd'],
-                }
-            new_message.update(fwd_data)
-
-            if (message_info['message_is_reply']):
-                reply_data = {
-                    'is_reply':message_info['message_is_reply']
-                    'reply_message_txt':message_info['reply_message_txt'],
-                    'reply_message_seed_id':message_info['reply_message_seed_id'],
-                    'reply_message_date':message_info['reply_message_date']
-                }
-                pass
-            else:
-                reply_data = {
-                    'reply_message_txt':message_info['reply_message_txt'],
-                    'reply_message_seed_id':message_info['reply_message_seed_id'],
-                    'reply_message_date':message_info['reply_message_date']
-                }
-            new_message.update(reply_data)
-
-            data['messages'].append(new_message)
-            json_data = json.dumps(data,indent = 4)
-            with open(json_file_name,'w') as f:
+            try:
+                data[data_key].append(data)
+            except KeyError:
+                data[data_key] = data
+            json_data = json_dumps(data,indent=4)
+            with open(file_name,'w') as f:
                 f.write(json_data)
-            logging.info('end store message')
+
+    def store_message_in_json_file(self,message_info):
+        """
+        将获得的消息信息，存入json 文件中
+        """
+        now = datetime.now()
+        file_data =  now.strftime("%d_%m_%y")
+        json_file_name = file_data+'_messages.json'
+
+        new_message = {
+            'channel_id':message_info['channel_id'],
+            'message_data':message_info['message_txt'],
+            'sender_id':message_info['chat_user_id'],
+            'is_bot':message_info['message_is_bot'],
+            'is_group':message_info['message_is_group'],
+            'is_private':message_info['message_is_private'],
+            'is_channel':message_info['message_is_channel'],
+            'channel_size':message_info['message_channel_size'],
+            'message_tcreate':message_info['messsage_tcreate'],
+            }
+        if (message_info['message_is_mention']):
+            mention_data = {
+                'is_mention':message_info['message_is_mention'],
+                'mentioned_user_id':message_info['message_mention_user_id'],
+            }
+        else:
+            mention_data = {
+                'is_mention':message_info['message_is_mention']
+            }
+            pass
+
+        new_message.update(mention_data)
+        if (message_info['message_is_fwd']):
+            fwd_data{
+                'is_fwd':message_info['message_is_fwd'],
+                'fwd_message_txt':message_info['fwd_message_txt'],
+                'fwd_message_seed_id':message_info['fwd_message_seed_id'],
+                'fwd_message_date':message_info['fwd_message_date']
+            }
+        else:
+            fwd_data{
+                'is_fwd':message_info['message_is_fwd'],
+            }
+        new_message.update(fwd_data)
+
+        if (message_info['message_is_reply']):
+            reply_data = {
+                'is_reply':message_info['message_is_reply']
+                'reply_message_txt':message_info['reply_message_txt'],
+                'reply_message_seed_id':message_info['reply_message_seed_id'],
+                'reply_message_date':message_info['reply_message_date']
+            }
+            pass
+        else:
+            reply_data = {
+                'reply_message_txt':message_info['reply_message_txt'],
+                'reply_message_seed_id':message_info['reply_message_seed_id'],
+                'reply_message_date':message_info['reply_message_date']
+            }
+        new_message.update(reply_data)
+        self.store_data_in_json_file(json_file_name, self.lock_message, 'messages', new_message)
 
     def flush_status_in_sql(self,message_info):
         """ 
@@ -553,13 +523,13 @@ class TGInformer:
             logging.info(f'........get the channel message is ({message})!!!!!!!!!!!!!!!')
         # 如果是群组，获得群组的 id
         elif isinstance(event.message.to_id, PeerChat):
-            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
             channel_id = event.message.chat_id
+            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
         else:
             # 两者均不是，跳过
             return
     
-        e = self.get_message_info_from_event(event)
+        e = self.get_message_info_from_event(event,channel_id)
         self.flush_status_in_sql(e)
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
@@ -573,7 +543,6 @@ class TGInformer:
         # 处理新消息
         @self.client.on(events.NewMessage)
         async def message_event_handler(event):
-            #logging.info('!!!!!!!!!!!Get a message')
             # 通过协程存储当前的新消息
             await self.message_dump(event)
 
@@ -581,7 +550,6 @@ class TGInformer:
 
         for dialog in self.client.iter_dialogs():
             e = self.get_channel_info_by_dialog(dialog)
-
             self.channel_list.append(e['channel_id'])
 
             self.channel_meta[e['channel_id']] = {
@@ -630,33 +598,22 @@ class TGInformer:
         """
         count = 0
         channel_list = []
-
         for dialog in self.client.iter_dialogs():
-            # 会话的 channel id
-            channel_id = dialog.id
-
             # 会话不能是用户间的对话
             if not dialog.is_user:
-                # 如果 channel id 是正整数，则去除前三位，取正整数channel id
-                if str(abs(channel_id))[:3] == '100':
-                    channel_id = int(str(abs(channel_id))[3:])
                 # 将 channel 加入现在可监控的 channel 列表
                 channel_list.append({
-                    'id':channel_id,
-                    'channel id':channel_id,
+                    'channel id':dialog.id,
                     'channel name':dialog.name
                     })
                     cout +=1
                 logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
-
         logging.info(f'Count:{count}')
-        pass
 
     async def bot_interval(self):
         """ 
         根据当前的配置建立会话，并保存 session ，方便下一次登录
         """ 
-
         logging.info(f'Logging in with account # {self.account.account_phone} ... \n')
 
         # 用来存储会话文件的地址，方便下一次的会话连接
@@ -686,13 +643,12 @@ class TGInformer:
         await self.init_monitor_channels()
         
 
-        # 循环重置敏感字列表
+        # 循环
         count = 0
         while True:
             count +=1
             logging.info(f'### {count} Running bot interval')
 
-            # await self.init_keywords()
             self.channel_count()
             self.check_informer_info()
             await asyncio.sleep(self.CHANNEL_REFRESH_WAIT)
