@@ -114,7 +114,7 @@ class TGInformer:
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
 
-    def get_channel_user_count(self,channel_id):
+    async def get_channel_user_count(self,channel_id):
         """ 
         获得 channel 的用户人数
         """ 
@@ -314,7 +314,7 @@ class TGInformer:
         """ 
         pass
 
-    def get_message_info_from_event(self,event,channel_id):
+    async def get_message_info_from_event(self,event,channel_id):
         """ 
         从 event 中获得需要的 info
         """ 

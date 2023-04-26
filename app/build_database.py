@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlalchemy as db
 from datetime import datetime
 from sqlalchemy.orm import sessionmaker
-from models import Account, Channel, ChatUser, Keyword, Message, Monitor, Notification
+from models import Account, Channel, ChatUser, Message
 
 """ 
 本文件是在项目第一次执行时执行的文件，目标在数据库中建立相应的表字段结构
