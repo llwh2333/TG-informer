@@ -13,7 +13,6 @@ class Account(Base):
     将要被用作监控的 tg 账户
     """
     __tablename__ = 'account'
-    #指定数据库中关联到该 ORM 类的表的名称
     id = Column(BigInteger, index=True, primary_key=True, autoincrement=True)
     account_id = Column(BigInteger, nullable=False, index=True)         # 傀儡账户的 id
     account_api_id = Column(Integer, default=None, nullable=False)      # API
@@ -29,11 +28,7 @@ class Account(Base):
     account_is_enabled = Column(Boolean(), default=True)
     account_tcreate = Column(DateTime, default=datetime.now())
     account_tmodified = Column(DateTime, default=datetime.now())
- 
-    channels = relationship('Channel', back_populates='accounts')
-    messages = relationship('Message', back_populates='account')
 
-    pass
 
 class Channel(Base):
     """ 
@@ -45,21 +40,16 @@ class Channel(Base):
     channel_name = Column(String(256), default=None, nullable=True)                     # 频道名称（系统分配）
     channel_title = Column(String(256), default=None, nullable=True)                    # 频道公开
     channel_url = Column(String(256), nullable=True)                                    # 频道地址
-    account_id = Column(BigInteger, ForeignKey('account.account_id'), nullable=False)   # 监控这个频道的账户
+    account_id = Column(BigInteger, nullable=False)   # 监控这个频道的账户
     channel_is_mega_group = Column(Boolean(), nullable=True)                            # 是否超级群组
     channel_is_group = Column(Boolean(), nullable=True)                                 # 是否为群组
     channel_is_private = Column(Boolean(), nullable=True)                               # 是否私密
     channel_is_broadcast = Column(Boolean(), nullable=True)                             # 是广播吗
     channel_access_hash = Column(String(50), nullable=True)                             # 频道的 hash
     channel_size = Column(Integer, nullable=True)                                       # 频道大小（成员数）
-
     # 在数据库中当 is_enabled 为 False 将被添加，失败将被删除，并发送通知
-    channel_is_enabled = Column(Boolean(), nullable=True, default=False)
-                                
+    channel_is_enabled = Column(Boolean(), nullable=True, default=False)                   
     channel_tcreate = Column(DateTime, default=datetime.now())                          # 创建时间
-
-    messages = relationship('Message')
-    accounts = relationship('Account', back_populates='channels')
 
 class ChatUser(Base):
     """ 
@@ -83,7 +73,6 @@ class ChatUser(Base):
     chat_user_tcreate = Column(DateTime, default=datetime.now())                    # 创建时间
     chat_user_tmodified = Column(DateTime, default=datetime.now())                  # 最近修改时间
 
-    messages = relationship('Message')
 
 class Message(Base):
     """ 
@@ -91,33 +80,24 @@ class Message(Base):
     """
     __tablename__ = 'message'
     message_id = Column(BigInteger, primary_key=True, index=True)                           # 消息的 id
-    chat_user_id = Column(BigInteger, ForeignKey('chat_user.chat_user_id'), nullable=False) # 消息发送者 id
-    account_id = Column(BigInteger, ForeignKey('account.account_id'), nullable=False)       # 傀儡账户 id
-    channel_id = Column(BigInteger, ForeignKey('channel.channel_id'), nullable=False)       # 频道的 id
-
-    message_text = Column(String(10000), default=None)                                      # 消息内容
+    chat_user_id = Column(BigInteger,nullable=False)      # 消息发送者 id
+    account_id = Column(BigInteger,  nullable=False)       # 傀儡账户 id
+    channel_id = Column(BigInteger, nullable=False)       # 频道的 id
+    message_text = Column(String(1000), default=None)                                      # 消息内容
     message_is_mention = Column(Boolean(), default=None)                                    # 是否提及他人
-    message_mentioned_user_id = Column(BigInteger,ForeignKey('account.account_id'),nullable=True)
-
+    message_mentioned_user_id = Column(BigInteger,default=None)
     message_is_scheduled = Column(Boolean(), default=None)                                  # 是否预设发送
     message_is_fwd = Column(Boolean(), default=None)                                        # 是否转发消息
-    fwd_message_txt = Column(String(10000), default=None)
-    fwd_message_seed_id = chat_user_id = Column(BigInteger, ForeignKey('chat_user.chat_user_id'), nullable=True)
+    fwd_message_txt = Column(String(1000), default=None)
+    fwd_message_seed_id =  Column(BigInteger, default=None)
     fwd_message_date = Column(DateTime, default=None)
-
     message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
-    reply_message_txt = Column(String(10000), default=None)
-    reply_message_seed_id = chat_user_id = Column(BigInteger, ForeignKey('chat_user.chat_user_id'), nullable=True)
+    reply_message_txt = Column(String(1000), default=None)
+    reply_message_seed_id  = Column(BigInteger,default=None)
     reply_message_date = Column(DateTime, default=None)
-
-    message_is_bot = Column(Boolean(), default=None)                                        # 是否机器人发出
-
+    message_is_bot = Column(Boolean(), default=None)                                        # 是否机器人发出                                                                                                                                                                                                                       
     message_is_group = Column(Boolean(), default=None)
     message_is_private = Column(Boolean(), default=None)
     message_is_channel = Column(Boolean(), default=None)
     message_channel_size = Column(Integer, default=None)
     message_tcreate = Column(DateTime, default=datetime.now())
-
-    user = relationship('ChatUser', back_populates='messages')
-    account = relationship('Account', back_populates='messages')
-    channel = relationship('Channel', back_populates='messages')

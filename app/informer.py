@@ -118,32 +118,33 @@ class TGInformer:
         """ 
         获得 channel 的用户人数
         """ 
-        data = await self.client.get_entity(PeerChannel(-channel))
+        return 0
+        data = await self.client.get_entity(PeerChannel(channel_id))
         users = await self.client.get_participants(data)
         return users.total
 
-    def get_channel_info_by_dialog(self,dialog):
+    async def get_channel_info_by_dialog(self,dialog):
         """ 
         从会话中获得 channel 的信息
         """ 
-        channel_url = f'https://t.me/{dialog.entity.username}'
-
+        channel_url = 'unknown'
+        channel_access_hash = None
         if dialog.is_channel:
             channel_access_hash = dialog.entity.access_hash
-        elif dialog.is_group:
-            channel_access_hash = None
+
+        channel_size = 0
         channel_info = {
-            'channel_id':dialog.id,
-            'channel_name':dialog.name,
-            'channel_title':dialog.title,
+            'channel_id':dialog.id if dialog.id else None,
+            'channel_name':dialog.name if dialog.name else None,
+            'channel_title':dialog.title if dialog.title else None,
             'channel_url':channel_url,
             'account_id':self.account.account_id,
-            'channel_is_mega_group':True if  dialog.is_group and dialog.is_channel else False ,
+            'channel_is_mega_group':True if dialog.is_group and dialog.is_channel else False ,
             'channel_is_group':dialog.is_group,
             'channel_is_private':None,
             'channel_is_broadcast':dialog.is_channel,
             'channel_access_hash':channel_access_hash,
-            'channel_size':dialog.entity.participants_count,
+            'channel_size':channel_size,
             }
         return channel_info
         pass
@@ -177,7 +178,14 @@ class TGInformer:
         获取当前会话的所有成员信息
         """ 
         users_info_list = {}
-        for user in client.get_participants(dialog.entity):
+        if str(abs(dialog.id))[:3] == '100':
+            channel_id =dialog.id
+        else :
+            channel_id = int('-100'+str(abs(dialog.id)))
+        channel = self.client.get_entity(PeerChat(channel_id))
+        users = self.client.get_participants(channel)
+        count = 0
+        for user in users:
             user_name = user.username
             first_name = user.first_name
             last_name = user.last_name
@@ -196,9 +204,10 @@ class TGInformer:
                 'is_restricted': is_restricted,
                 'user_phone':user_phone,
                 'tlogin':None,
-                'modified':None
+                'modified':None,
             }
-            users_info_list[user_info['user_name']] = user_info
+            users_info_list[str(user_info['first_name']+user_info['last_name']+str(count))] = user_info
+            count += 1
         return users_info_list
 
     def store_user_info_in_json_file(self,user_info_list,dialog):
@@ -353,7 +362,8 @@ class TGInformer:
             """ 
             mention_user_id = None
         is_fwd = False if message_obj.fwd_from is None else True
-        if is_fwd:
+        flase = False
+        if iflase:
             fwd_message_txt = message_obj.fwd_from.data
             fwd_message_seed_id = message_obj.fwd_from.from_id
             fwd_message_date = None
@@ -368,6 +378,7 @@ class TGInformer:
         reply_message_txt = reply_obj.message
         reply_message_seed_id = reply_obj.sender
         reply_message_date = reply_obj.date
+        is_reply = None
         if is_reply:
             reply_message_txt = reply_message_txt
             reply_message_seed_id = reply_message_seed_id
@@ -380,7 +391,7 @@ class TGInformer:
         if channel_id in self.channel_list:
             channel_size = self.channel_meta[channel_id]['channel_size']
         else :
-            channel_size = self.get_channel_user_count(channel_id)
+            channel_size = 0 #self.get_channel_user_count(channel_id)
 
         message_info = {
             'message_id':event.message.id,
@@ -419,20 +430,20 @@ class TGInformer:
         打开 json 文件，并将数据存入
         """ 
         with lock:
-            if not os.path.exists(json_file_name):
-                with open(file_name,'w') as f:
+            if not os.path.exists(file_name):
+                with open(file_name,'w+') as f:
                     init_json ={}
                     json_first = json.dumps(init_json)
                     f.write(json_first)
-                    data = json.load(f)
+                    file_data = json.load(f)
             else:
-                with open(json_file_name,'r') as f:
-                    data = json.load(f)
+                with open(file_name,'r') as f:
+                    file_data = json.load(f)
             try:
-                data[data_key].append(data)
+                file_data[data_key].append(data)
             except KeyError:
-                data[data_key] = data
-            json_data = json_dumps(data,indent=4)
+                file_data[data_key] = data
+            json_data = json.dumps(file_data,indent=4)
             with open(file_name,'w') as f:
                 f.write(json_data)
 
@@ -529,8 +540,8 @@ class TGInformer:
             # 两者均不是，跳过
             return
     
-        e = self.get_message_info_from_event(event,channel_id)
-        self.flush_status_in_sql(e)
+        e = await self.get_message_info_from_event(event,channel_id)
+        #self.flush_status_in_sql(e)
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
 
@@ -545,11 +556,9 @@ class TGInformer:
         async def message_event_handler(event):
             # 通过协程存储当前的新消息
             await self.message_dump(event)
-
         #join_channel()
-
-        for dialog in self.client.iter_dialogs():
-            e = self.get_channel_info_by_dialog(dialog)
+        async for dialog in self.client.iter_dialogs():
+            e = await self.get_channel_info_by_dialog(dialog)
             self.channel_list.append(e['channel_id'])
 
             self.channel_meta[e['channel_id']] = {
@@ -561,7 +570,7 @@ class TGInformer:
             }
 
             self.dump_channel_info(e)
-            self.dump_channel_user_info(dialog)
+            #self.dump_channel_user_info(dialog)
 
         @self.client.on(events.ChatAction)
         async def channel_action_handler(event):
@@ -592,13 +601,13 @@ class TGInformer:
         self.check_channels_info_in_sql()
         self.check_channels_user_info_in_sql()
 
-    def channel_count(self):
+    async def channel_count(self):
         """ 
         统计当前账户中的 channel 的数量
         """
         count = 0
         channel_list = []
-        for dialog in self.client.iter_dialogs():
+        async for dialog in self.client.iter_dialogs():
             # 会话不能是用户间的对话
             if not dialog.is_user:
                 # 将 channel 加入现在可监控的 channel 列表
@@ -606,7 +615,7 @@ class TGInformer:
                     'channel id':dialog.id,
                     'channel name':dialog.name
                     })
-                cout +=1
+                count +=1
                 logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
         logging.info(f'Count:{count}')
 
@@ -639,7 +648,7 @@ class TGInformer:
 
         # 统计 channel 数量和初始化监控频道
         # await self.init_keywords()
-        self.channel_count()
+        await self.channel_count()
         await self.init_monitor_channels()
         
 
@@ -649,6 +658,6 @@ class TGInformer:
             count +=1
             logging.info(f'### {count} Running bot interval')
 
-            self.channel_count()
+            await self.channel_count()
             self.check_informer_info()
             await asyncio.sleep(self.CHANNEL_REFRESH_WAIT)

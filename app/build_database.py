@@ -78,6 +78,15 @@ def init_add_channels():
     # 获得数据库中的第一个傀儡账户的信息
     account = session.query(Account).first()
 
+    CHANNELS = [
+        {
+            'channel_name': 'Informer monitoring',
+            'channel_id': os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
+            'channel_url': os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_URL'],
+            'channel_is_private': False if os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_IS_PRIVATE']=='0' else True
+        },
+    ]
+
     # 从 csv 文件中读取我们需要监控的频道
     with open(os.environ['TELEGRAM_CHANNEL_MONITOR_LIST']) as csv_file:
 
@@ -94,7 +103,7 @@ def init_add_channels():
                      'channel_url': row[1]
                                 })
             line_count += 1
-    
+     
     logging.info(f'Inserting {line_count} channels to database')
 
     # 将所有的频道添加到数据库中
