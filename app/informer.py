@@ -33,15 +33,13 @@ banner = """
        /  _/___  / __/___  _________ ___  ___  _____
        / // __ \/ /_/ __ \/ ___/ __ `__ \/ _ \/ ___/
      _/ // / / / __/ /_/ / /  / / / / / /  __/ /    
-    /___/_/ /_/_/  \____/_/  /_/ /_/ /_/\___/_/
-    
+    /___/_/ /_/_/  \____/_/  /_/ /_/ /_/\___/_/ 
     --------------------------------------------------
 """
 
 logging.getLogger().setLevel(logging.INFO)
 
 class TGInformer:
-
     def __init__(self,
         # 数据库的配置参数
         db_database = os.environ['MYSQL_DATABASE'],
@@ -57,15 +55,17 @@ class TGInformer:
         ): 
 
         # 实例变量
-        self.channel_list = []
-
-        self.channel_meta = {}
+        self.channel_list = []                      # 当前已加入的 channel
+        self.channel_meta = {}                      # 已加入 channel 的信息
         self.bot_task = None
-        self.CHANNEL_REFRESH_WAIT = 15 * 60 # Every 15 minutes
+        self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
         self.MIN_CHANNEL_JOIN_WAIT = 30
         self.MAX_CHANNEL_JOIN_WAIT = 120
         self.client = None
         self.loop = asyncio.get_event_loop()
+        self.lock_message = threading.Lock()
+        self.lock_channel = threading.Lock()
+        self.lock_chat_user = threading.Lock()
 
         # 展示横幅
         print(banner)
@@ -108,49 +108,64 @@ class TGInformer:
         self.loop.run_until_complete(self.bot_interval())
         logging.info('the monitor will done?????')
 
-    def check_channel_in_sql(self):
+    async def get_channel_info_by_dialog(self,dialog):
         """ 
-        TODO:检查会话与数据库中channel 的是否对应，过去加入，现在离开的 channel 的 is_enabled 改为 none（暂时不弄）
+        从会话中获得 channel 的信息
         """ 
+        channel_url = 'unknown'
+        channel_access_hash = None
+        if dialog.is_channel:
+            channel_access_hash = dialog.entity.access_hash
+
+        channel_size = 0
+        channel_info = {
+            'channel_id':dialog.id if dialog.id else None,
+            'channel_name':dialog.name if dialog.name else None,
+            'channel_title':dialog.title if dialog.title else None,
+            'channel_url':channel_url,
+            'account_id':self.account.account_id,
+            'channel_is_mega_group':True if dialog.is_group and dialog.is_channel else False ,
+            'channel_is_group':dialog.is_group,
+            'channel_is_private':None,
+            'channel_is_broadcast':dialog.is_channel,
+            'channel_access_hash':channel_access_hash,
+            'channel_size':channel_size,
+            }
+        return channel_info
         pass
 
-    def store_user_info_in_json_file(self,user_info_list,dialog):
+    def store_channel_info_in_json_file(self,channel_info):
         """ 
-        将获得的 user 列表信息存储到本地 json 中
+        将 channel 信息存储到 json 文件中
         """ 
         lock = threading.Lock()
         now = datetime.now()
         file_data =  now.strftime("%d_%m_%y")
-        
-        json_file_name = file_data+'_chat_user.json'
-        with lock:
-            logging.info('begin store chat users')
-            if not os.path.exists(json_file_name):
-                with open(json_file_name,'w') as f:
-                    init_json = {}
-                    json_first = json.dumps(init_json)
-                    f.write(json_first)
-                    data = json.load(f)
-            else:
-                with open(json_file_name,'r') as f:
-                    data = json.load(f)
-            data[dialog.name].append(user_info_list)
-            json_data = json.dumps(data,indent=4)
-            with open(json_file_name,'w') as f :
-                f.write(json_data)
-            logging.info('end store chat users')
+        json_file_name = file_data+'_channel_info.json'
 
-    def store_user_info_in_sql(self,user_info_list,dialog):
+        self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info)
+
+    def dump_channel_info(self,channel_info):
         """ 
-        TODO:将获得的 user 列表信息存储到 sql 库中(暂时不弄)
+        将 channel 信息存储下来
         """ 
+        self.store_channel_info_in_json_file(channel_info)
+        self.store_channel_info_in_sql(channel_info)
 
     def get_user_info_from_dialog(self,dialog):
         """ 
         获取当前会话的所有成员信息
         """ 
+        
         users_info_list = {}
-        for user in client.get_participants(dialog.entity):
+        if str(abs(dialog.id))[:3] == '100':
+            channel_id =dialog.id
+        else :
+            channel_id = int('-100'+str(abs(dialog.id)))
+        channel = self.client.get_entity(PeerChat(channel_id))
+        users = self.client.get_participants(channel)
+        count = 0
+        for user in users:
             user_name = user.username
             first_name = user.first_name
             last_name = user.last_name
@@ -169,10 +184,21 @@ class TGInformer:
                 'is_restricted': is_restricted,
                 'user_phone':user_phone,
                 'tlogin':None,
-                'modified':None
+                'modified':None,
             }
-            users_info_list[user_info['user_name']] = user_info
+            users_info_list[str(user_info['first_name']+user_info['last_name']+str(count))] = user_info
+            count += 1
         return users_info_list
+
+    def store_user_info_in_json_file(self,user_info_list,dialog):
+        """ 
+        将获得的 user 列表信息存储到本地 json 中
+        """ 
+        now = datetime.now()
+        file_data =  now.strftime("%d_%m_%y")
+        json_file_name = file_data+'_chat_user.json'
+
+        self.store_data_in_json_file(json_file_name, self.lock_chat_user, dialog.name,user_info_list)
 
     def dump_channel_user_info(self,dialog):
         """ 
@@ -182,203 +208,16 @@ class TGInformer:
         self.store_user_info_in_json_file(e,dialog)
         self.store_user_info_in_sql(e,dialog)
 
-    def flush_channel_info_in_sql(self,channel_info):
-        """ 
-        TODO:更新数据库中对应频道的信息，如果没有，创建相应一个条目（暂时不弄）
-        """ 
-        pass
-
-    def join_channel(self):
-        """ 
-        TODO:根据数据库中未加入的频道信息，加入频道（暂时不弄，下面的是以前写的）
-        """ 
-        #记录现在已经加入的 channel
-        current_channels = []
-
-        # 获取傀儡账户的现存的会话信息
-        for dialog in self.client.iter_dialogs():
-            # 会话的 channel id
-            channel_id = dialog.id
-
-            # 会话不能是用户间的对话
-            if not dialog.is_user:
-                # 如果 channel id 是正整数，则去除前三位，取正整数channel id
-                if str(abs(channel_id))[:3] == '100':
-                    channel_id = int(str(abs(channel_id))[3:])
-                # 将 channel 加入现在可监控的 channel 列表
-                current_channels.append(channel_id)
-            
-        ########################### 获取数据库中待添加的 channel
-        self.session = self.Session()
-        Channels = self.session.query(Channel).filter_by(account_id=self.account.account_id).all()
-
-        channel_to_join = []
-        for channel in Channels:
-            channel_data = {
-                'channel_id': channel.channel_id, 
-                'channel_name': channel.channel_name,
-                'channel_title': channel.channel_title,
-                'channel_url': channel.channel_url,
-                'account_id': channel.account_id,
-                'channel_is_megagroup': channel.channel_is_mega_group,
-                'channel_is_group': channel.channel_is_group,
-                'channel_is_private': channel.channel_is_private,
-                'channel_is_broadcast': channel.channel_is_broadcast,
-                'channel_access_hash': channel.channel_access_hash,
-                'channel_size': channel.channel_size,
-                'channel_is_enabled': channel.channel_is_enabled,
-                'channel_tcreate': channel.channel_tcreate
-            }
-            if channel.channel_is_enabled is False:
-                channel_to_join.append(channel_data)
-        self.session.close()
-
-        # 将数据库中的 channel 加入账户中
-        self.session = self.Session()
-        for channel in channel_to_join:
-            sql_channel_id = channel['channel_id'] 
-            if str(abs(sql_channel_id))[:3] == '100':
-                sql_channel_id = int(str(abs(sql_channel_id))[3:])
-            # 如果早已加入跳过这个 channel
-            if sql_channel_id in current_channels:
-                channel['channel_is_enabled'] = True
-                continue
-
-            # 通过 url 加入channel
-            # 当 channel url 中有 joinchat 时
-            if channel['channel_url'] and '/joinchat/' in channel['channel_url']:
-                channel_hash = channel['channel_url'].replace('https://t.me/joinchat/', '')
-                try:
-                    # 导入并加入指定哈希值的聊天组
-                    await self.client(ImportChatInviteRequest(hash=channel_hash))
-                    sec = randrange(self.MIN_CHANNEL_JOIN_WAIT, self.MAX_CHANNEL_JOIN_WAIT)
-                    logging.info(f'sleeping for {sec} seconds')
-                    await asyncio.sleep(sec)
-                # 成功加入
-                except InviteRequestSentError as e:
-                    logging.info(f'sussesful join the channel: {channel["channel_url"]}')
-                    channel['channel_is_enabled'] = True
-                except UserAlreadyParticipantError as e:
-                    logging.info('Already in channel, skipping')
-                    channel['channel_is_enabled'] = True
-                # 其它错误
-                except FloodWaitError as e:
-                    logging.info(f'Received FloodWaitError, waiting for {e.seconds} seconds..')
-                    await asyncio.sleep(e.seconds * 2)
-                except SessionPasswordNeededError as e:
-                    logging.info('Two-steps verification is enabled and a password is required.')
-                    self.send_notification(channel['channel_url'])
-                    # 删除这个 channel 的数据库信息 todo：
-                except ChannelPrivateError as e:
-                    logging.info('Channel is private or we were banned bc we didnt respond to bot')
-                    self.send_notification(channel['channel_url'])
-                    # 删除这个 channel 的数据库信息 todo：
-        pass
-
-    def store_message_in_sql(self,message_info):
-        """
-        TODO:将获得的消息信息存储进入 sql 中(暂时不弄)
-        """
-        pass
-
-    def store_message_in_json_file(self,message_info):
-        """
-        将获得的消息信息，存入json 文件中
-        """
-        lock = threading.Lock()
-        now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
-        
-        json_file_name = file_data+'_messages.json'
-        with lock:    
-            logging.info('begin store message')
-            if not os.path.exists(json_file_name):
-                with open(json_file_name,'w') as f:
-                    init_json = {'message':None}
-                    json_first = json.dumps(init_json)
-                    f.write(json_first)
-                    data = json.load(f)
-            else:
-                with open(json_file_name,'r') as f:
-                    data = json.load(f)
-            new_message = {
-                'channel_id':message_info['channel_id'],
-                'message_data':message_info['message_txt'],
-                'sender_id':message_info['chat_user_id'],
-                'is_bot':message_info['message_is_bot'],
-                'is_group':message_info['message_is_group'],
-                'is_private':message_info['message_is_private'],
-                'is_channel':message_info['message_is_channel'],
-                'channel_size':message_info['message_channel_size'],
-                'message_tcreate':message_info['messsage_tcreate'],
-                }
-            if (message_info['message_is_mention']):
-                mention_data = {
-                    'is_mention':message_info['message_is_mention'],
-                    'mentioned_user_id':message_info['message_mention_user_id'],
-                }
-            else:
-                mention_data = {
-                    'is_mention':message_info['message_is_mention']
-                }
-                pass
-            new_message.update(mention_data)
-
-            if (message_info['message_is_fwd']):
-                fwd_data{
-                    'is_fwd':message_info['message_is_fwd'],
-                    'fwd_message_txt':message_info['fwd_message_txt'],
-                    'fwd_message_seed_id':message_info['fwd_message_seed_id'],
-                    'fwd_message_date':message_info['fwd_message_date']
-                }
-            else:
-                fwd_data{
-                    'is_fwd':message_info['message_is_fwd'],
-                }
-            new_message.update(fwd_data)
-
-            if (message_info['message_is_reply']):
-                reply_data = {
-                    'is_reply':message_info['message_is_reply']
-                    'reply_message_txt':message_info['reply_message_txt'],
-                    'reply_message_seed_id':message_info['reply_message_seed_id'],
-                    'reply_message_date':message_info['reply_message_date']
-                }
-                pass
-            else:
-                reply_data = {
-                    'reply_message_txt':message_info['reply_message_txt'],
-                    'reply_message_seed_id':message_info['reply_message_seed_id'],
-                    'reply_message_date':message_info['reply_message_date']
-                }
-            new_message.update(reply_data)
-
-            data['messages'].append(new_message)
-            json_data = json.dumps(data,indent = 4)
-            with open(json_file_name,'w') as f:
-                f.write(json_data)
-            logging.info('end store message')
-
-    def get_channel_user_count(self,channel_id):
-        """ 
-        获得 channel 的用户人数
-        """ 
-        data = await self.client.get_entity(PeerChannel(-channel))
-        users = await self.client.get_participants(data)
-        return users.total
-
-    def get_message_info_from_event(self,event):
+    async def get_message_info_from_event(self,event,channel_id):
         """ 
         从 event 中获得需要的 info
         """ 
         message_obj = event.message
         if isinstance(message_obj.to_id, PeerChannel):
-            channel_id = message_obj.to_id.channel_id
             is_channel = True
             is_group = False
             is_private = False
         elif isinstance(message_obj.to_id, PeerChat):
-            channel_id = message_obj.chat_id
             is_channel = False
             is_group = True
             is_private = False
@@ -389,77 +228,76 @@ class TGInformer:
 
         is_bot = False if message_obj.via_bot_id is None else True
 
-        entities = message_obj.entities
-        mentioned_users = []
-        for entity in entities:
-            if entity.type == 'Mention':
-                mentioned_users.append(entity.get_input_string())
-        if mentioned_users == []:
-            is_mention = False
-            mention_user_id = None
-        else:
-            is_mention = True
-            user_entities = await self.client.get_entity(mentioned_users)
-            mention_id = []
-            for entity in user_entities:
-                mention_id.append(entity.id)
-            mention_user_id = mention_id[0]
-
-        is_fwd = False if message_obj.fwd_from is None else True
-        if is_fwd:
-            fwd_message_txt = message_obj.fwd_from.data
-            fwd_message_seed_id = message_obj.fwd_from.from_id
-            fwd_message_date = None
-        else:
-            fwd_message_txt = None
-            fwd_message_seed_id = None
-            fwd_message_date = None
-
-        is_reply = False if message_obj.reply_to_msg_id is None else True
-
-        reply_obj = await event.get_reply_message()
-        reply_message_txt = reply_obj.message
-        reply_message_seed_id = reply_obj.sender
-        reply_message_date = reply_obj.date
-        if is_reply:
-            reply_message_txt = reply_message_txt
-            reply_message_seed_id = reply_message_seed_id
-            reply_message_date = reply_message_date
-        else:
-            reply_message_txt = None
-            reply_message_seed_id = None
-            reply_message_date = None
-
-        if channel_id in self.channel_list:
-            channel_size = self.channel_meta[channel_id]['channel_size']
-        else :
-            channel_size = self.get_channel_user_count(channel_id)
-
         message_info = {
-            'message_id':event.message_id,
+            'message_id':event.message.id,
             'chat_user_id':event.sender_id,
             'account_id':self.account.account_id,                               # 傀儡账户 id
             'channel_id':channel_id,                                            # 频道的 id
             'message_text':event.raw_text,                                      # 消息内容
-            'message_is_mention':is_mention,                                  # 是否提及他人
-            'message_mentioned_user_id':mention_user_id,
-            'message_is_scheduled':message_obj.from_scheduled,                                   # 是否预设发送
-            'message_is_fwd':is_fwd,                                   # 是否转发消息
-            'fwd_message_txt'::fwd_message_txt ,
-            'fwd_message_seed_id':fwd_message_seed_id, 
-            'fwd_message_date':fwd_message_date ,
-            'message_is_reply':is_reply,                                        # 是否是回复
-            'reply_message_txt':reply_message_txt ,
-            'reply_message_seed_id':reply_message_seed_id, 
-            'reply_message_date':reply_message_date,
-            'message_is_bot':is_bot,                                          # 是否机器人发出
+            'message_is_scheduled':message_obj.from_scheduled,                  # 是否预设发送
+            'message_is_bot':is_bot,                                            # 是否机器人发出
             'message_is_group':is_group,
             'message_is_private':is_private,
             'message_is_channel':is_channel ,
-            'message_channel_size':channel_size,
             'message_tcreate':datetime.now()
             }
         return message_info
+
+    def store_data_in_json_file(self,file_name,lock,data_key,data,):
+        """ 
+        打开 json 文件，并将数据存入
+        """ 
+        with lock:
+            if not os.path.exists(file_name):
+                with open(file_name,'w') as f:
+                    init_json ={}
+                    json_first = json.dumps(init_json)
+                    f.write(json_first)
+                with open(file_name, 'r') as f:
+                    file_data = json.load(f)
+            else:
+                with open(file_name,'r') as f:
+                    file_data = json.load(f)
+            try:
+                file_data[data_key].append(data)
+            except KeyError:
+                file_data[data_key] = []
+                file_data[data_key].append(data)
+            json_data = json.dumps(file_data,indent=4)
+            with open(file_name,'w') as f:
+                f.write(json_data)
+
+    def store_message_in_json_file(self,message_info):
+        """
+        将获得的消息信息，存入json 文件中
+        """
+        now = datetime.now()
+        file_data =  now.strftime("%d_%m_%y")
+        json_file_name = file_data+'_messages.json'
+
+        new_message = {
+            'channel_id':message_info['channel_id'],
+            'message_data':message_info['message_text'],
+            'sender_id':message_info['chat_user_id'],
+            'is_bot':message_info['message_is_bot'],
+            'is_group':message_info['message_is_group'],
+            'is_private':message_info['message_is_private'],
+            'is_channel':message_info['message_is_channel']
+            }
+
+        self.store_data_in_json_file(json_file_name, self.lock_message, 'messages', new_message)
+
+    def flush_status_in_sql(self,message_info):
+        """ 
+        根据 message 更新一些状态信息
+        用户的登录时间
+        """ 
+        status_session = self.Session()
+        user_object = status_session.query(ChatUser).filter_by(chat_user_id=message_info['chat_user_id']).first()
+        if user_object:
+            user_object.chat_user_tlogin = message_info['message_tcreate']
+        else:
+            return
 
     async def message_dump(self,event):
         """ 
@@ -475,44 +313,16 @@ class TGInformer:
             logging.info(f'........get the channel message is ({message})!!!!!!!!!!!!!!!')
         # 如果是群组，获得群组的 id
         elif isinstance(event.message.to_id, PeerChat):
-            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
-            flag = 0
             channel_id = event.message.chat_id
+            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
         else:
             # 两者均不是，跳过
             return
-        e = self.get_message_info_from_event(event)
+    
+        e = await self.get_message_info_from_event(event,channel_id)
+        #self.flush_status_in_sql(e)
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
-
-    def stop_bot_interval(self):
-        self.bot_task.cancel()
-
-    def get_channel_info_by_dialog(self,dialog):
-        """ 
-        从会话中获得 channel 的信息
-        """ 
-        channel_url = f'https://t.me/{dialog.entity.username}'
-
-        if dialog.is_channel:
-            channel_access_hash = dialog.entity.access_hash
-        elif dialog.is_group:
-            channel_access_hash = None
-        channel_info = {
-            'channel_id':dialog.id,
-            'channel_name':dialog.name,
-            'channel_title':dialog.title,
-            'channel_url':channel_url,
-            'account_id':self.account.account_id,
-            'channel_is_mega_group':True if  dialog.is_group and dialog.is_channel else False ,
-            'channel_is_group':dialog.is_group,
-            'channel_is_private':None,
-            'channel_is_broadcast':dialog.is_channel,
-            'channel_access_hash':channel_access_hash,
-            'channel_size':dialog.entity.participants_count,
-            }
-        return channel_info
-        pass
 
     async def init_monitor_channels(self):
         """ 
@@ -523,14 +333,12 @@ class TGInformer:
         # 处理新消息
         @self.client.on(events.NewMessage)
         async def message_event_handler(event):
-            #logging.info('!!!!!!!!!!!Get a message')
             # 通过协程存储当前的新消息
             await self.message_dump(event)
-
         #join_channel()
 
-        for dialog in self.client.iter_dialogs():
-            e = self.get_channel_info_by_dialog(dialog)
+        async for dialog in self.client.iter_dialogs():
+            e = await self.get_channel_info_by_dialog(dialog)
             self.channel_list.append(e['channel_id'])
 
             self.channel_meta[e['channel_id']] = {
@@ -541,51 +349,53 @@ class TGInformer:
                'channel_texpire': datetime.now() + timedelta(hours=3)
             }
 
-            self.flush_channel_info_in_sql(e)
+            #self.dump_channel_info(e)
+            #self.dump_channel_user_info(dialog)
 
-            self.dump_channel_user_info(dialog)
-
-        self.check_channel_in_sql()
-
-        """ 
-        TODO:对于产生的成员变动的信息更新处理
-        """ 
+        @self.client.on(events.ChatAction)
+        async def channel_action_handler(event):
+            await self.updata_channel_user_info(event)
 
         logging.info(f"{sys._getframe().f_code.co_name}: Monitoring channels: {json.dumps(self.channel_list, indent=4)}")
         logging.info(f'Channel METADATA: {self.channel_meta}')
 
-    def channel_count(self):
+    def stop_bot_interval(self):
+        self.bot_task.cancel()
+
+
+
+
+
+
+    def check_informer_info(self):
+        """ 
+        每隔一定时间，对于 sql 和账户内容进行对齐
+        """ 
+        self.check_channels_info_in_sql()
+        self.check_channels_user_info_in_sql()
+
+    async def channel_count(self):
         """ 
         统计当前账户中的 channel 的数量
         """
         count = 0
         channel_list = []
-
-        for dialog in self.client.iter_dialogs():
-            # 会话的 channel id
-            channel_id = dialog.id
-
+        async for dialog in self.client.iter_dialogs():
             # 会话不能是用户间的对话
             if not dialog.is_user:
-                # 如果 channel id 是正整数，则去除前三位，取正整数channel id
-                if str(abs(channel_id))[:3] == '100':
-                    channel_id = int(str(abs(channel_id))[3:])
                 # 将 channel 加入现在可监控的 channel 列表
                 channel_list.append({
-                    'id':count,
-                    'channel id':channel_id,
+                    'channel id':dialog.id,
                     'channel name':dialog.name
                     })
+                count +=1
                 logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
-
         logging.info(f'Count:{count}')
-        pass
 
     async def bot_interval(self):
         """ 
         根据当前的配置建立会话，并保存 session ，方便下一次登录
         """ 
-
         logging.info(f'Logging in with account # {self.account.account_phone} ... \n')
 
         # 用来存储会话文件的地址，方便下一次的会话连接
@@ -611,16 +421,69 @@ class TGInformer:
 
         # 统计 channel 数量和初始化监控频道
         # await self.init_keywords()
-        self.channel_count()
+        await self.channel_count()
         await self.init_monitor_channels()
         
 
-        # 循环重置敏感字列表
+        # 循环
         count = 0
         while True:
             count +=1
             logging.info(f'### {count} Running bot interval')
 
-            # await self.init_keywords()
-            self.channel_count()
+            await self.channel_count()
+            self.check_informer_info()
             await asyncio.sleep(self.CHANNEL_REFRESH_WAIT)
+
+    def check_channels_user_info_in_sql(self):
+        """ 
+        TODO: 将 sql 中的 channel 参与者信息与 account 中的保持一致 
+        """ 
+        pass
+
+    def check_channels_info_in_sql(self):
+        """ 
+        TODO: 将 sql 中的 channel 信息与 account 中的保持一致 
+        """ 
+        pass
+
+    def store_message_in_sql(self,message_info):
+        """
+        TODO:将获得的消息信息存储进入 sql 中(暂时不弄)
+        """
+        pass
+
+    def join_channel(self):
+        """ 
+        TODO:根据数据库中未加入的频道信息，加入频道（暂时不弄，下面的是以前写的）
+        """ 
+        pass
+
+    def store_user_info_in_sql(self,user_info_list,dialog):
+        """ 
+        TODO:将获得的 user 列表信息存储到 sql 库中(暂时不弄)
+        """ 
+        pass
+
+    def store_channel_info_in_sql(self,channel_info):
+        """ 
+        TODO:将 channel 信息存储到 sql 中
+        """ 
+        pass
+
+    async def get_channel_user_count(self,channel_id):
+        """ 
+        获得 channel 的用户人数
+        """ 
+        return 0
+
+    def updata_channel_user_info(self,event):
+        """ 
+        TODO: 根据 channel 的成员变动事件，更新 channel 成员
+        """ 
+
+    def updata_channel_user_info(self,event):
+        """ 
+        TODO: 根据 channel 的成员变动事件，更新 channel 成员
+        """ 
+
