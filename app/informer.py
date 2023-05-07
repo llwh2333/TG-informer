@@ -362,11 +362,6 @@ class TGInformer:
     def stop_bot_interval(self):
         self.bot_task.cancel()
 
-
-
-
-
-
     def check_informer_info(self):
         """ 
         每隔一定时间，对于 sql 和账户内容进行对齐

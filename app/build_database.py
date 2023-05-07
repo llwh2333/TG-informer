@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlalchemy as db
 from datetime import datetime
 from sqlalchemy.orm import sessionmaker
-from models import Account, Channel, ChatUser, Keyword, Message, Monitor, Notification
+from models import Account, Channel, ChatUser, Message
 
 """ 
 本文件是在项目第一次执行时执行的文件，目标在数据库中建立相应的表字段结构
@@ -78,6 +78,15 @@ def init_add_channels():
     # 获得数据库中的第一个傀儡账户的信息
     account = session.query(Account).first()
 
+    CHANNELS = [
+        {
+            'channel_name': 'Informer monitoring',
+            'channel_id': os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
+            'channel_url': os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_URL'],
+            'channel_is_private': False if os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_IS_PRIVATE']=='0' else True
+        },
+    ]
+
     # 从 csv 文件中读取我们需要监控的频道
     with open(os.environ['TELEGRAM_CHANNEL_MONITOR_LIST']) as csv_file:
 
@@ -94,7 +103,7 @@ def init_add_channels():
                      'channel_url': row[1]
                                 })
             line_count += 1
-    
+     
     logging.info(f'Inserting {line_count} channels to database')
 
     # 将所有的频道添加到数据库中
@@ -130,9 +139,6 @@ def init_db():
     ChatUser.metadata.create_all(engine)
     Channel.metadata.create_all(engine)
     Message.metadata.create_all(engine)
-    #Keyword.metadata.create_all(engine)
-    #Monitor.metadata.create_all(engine)
-    #Notification.metadata.create_all(engine)
 
     # 关闭 session 对象
     session.close()
@@ -149,9 +155,7 @@ def init_data():
 
     #初始化数据
     init_add_account()
-    init_add_channels()
-    #init_add_keywords()
-    #init_add_monitors()
+    init_add_channels(
 
     session.close()
 
