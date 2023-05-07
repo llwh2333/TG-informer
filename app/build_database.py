@@ -155,7 +155,7 @@ def init_data():
 
     #初始化数据
     init_add_account()
-    init_add_channels(
+    init_add_channels()
 
     session.close()
 
