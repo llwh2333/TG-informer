@@ -111,13 +111,18 @@ class TGInformer:
     async def get_channel_info_by_dialog(self,dialog):
         """ 
         从会话中获得 channel 的信息
+        （待完善）
         """ 
+        #后面看看怎么获取到 url
         channel_url = 'unknown'
+
         channel_access_hash = None
         if dialog.is_channel:
             channel_access_hash = dialog.entity.access_hash
 
+        #后面调用函数获得 channel 大小
         channel_size = 0
+
         channel_info = {
             'channel_id':dialog.id if dialog.id else None,
             'channel_name':dialog.name if dialog.name else None,
@@ -132,7 +137,6 @@ class TGInformer:
             'channel_size':channel_size,
             }
         return channel_info
-        pass
 
     def store_channel_info_in_json_file(self,channel_info):
         """ 
@@ -140,7 +144,7 @@ class TGInformer:
         """ 
         lock = threading.Lock()
         now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
+        file_data = now.strftime("%d_%m_%y")
         json_file_name = file_data+'_channel_info.json'
 
         self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info)
@@ -155,6 +159,7 @@ class TGInformer:
     def get_user_info_from_dialog(self,dialog):
         """ 
         获取当前会话的所有成员信息
+        （之前有一些 bug 等后面排除）
         """ 
         
         users_info_list = {}
@@ -263,7 +268,7 @@ class TGInformer:
             except KeyError:
                 file_data[data_key] = []
                 file_data[data_key].append(data)
-            json_data = json.dumps(file_data,indent=4)
+            json_data = json.dumps(file_data,ensure_ascii=False,indent=4)
             with open(file_name,'w') as f:
                 f.write(json_data)
 
@@ -299,10 +304,62 @@ class TGInformer:
         else:
             return
 
+    def GetImageName(self,event):
+        """ 
+        获得图片文件名，用于存储
+        """ 
+        now = datetime.now()
+        file_data = now.strftime("%d_%m_%y")
+        image_name = event.message.file.name
+        if image_name == None:
+            image_name='no_name'
+        file_name = file_data+image_name+str(event.sender_id)
+        return file_name
+
+    async def download_file(self,event,file_path):
+        """ 
+        将图片存储到指定路径
+        """ 
+        if event.photo:
+            pass
+        else:
+            logging.info(f'not picture ')
+            return 
+        file_name = self.GetImageName(event)
+        download_path = file_path+'/' + file_name+'.jpg'
+        await event.download_media(download_path)
+        logging.info(f'picture down OK')
+        """
+        mime_type = 'unknown/unknown'
+        if hasattr(event.message.media, 'document'):
+            mime_type = event.message.media.document.mime_type
+        elif hasattr(event.message.media, 'photo'):
+            mime_type = 'image/jpg'
+        meida_type = mime_type.split('/')
+
+        file_name = 'unknown'
+        if (meida_type == 'image'):
+            file_name = self.GetImageName(event)
+        else:
+            return 
+        download_path = file_path+'/' + file_name+'.jpg'
+        await event.download_media(download_path)
+        logging.info(f'picture down OK')
+        """
+        #await event.message.download_media(download_path)
+
     async def message_dump(self,event):
         """ 
         将收到的消息进行存储，存储到数据库和 json 文件中
         """ 
+
+        #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
+        #图片名称：time_message_id
+        if event.message.media is not None:
+            file_path = './picture'
+            logging.info(f'the message have media')
+            await self.download_file(event,file_path)
+
         message = event.raw_text
 
         if isinstance(event.message.to_id, PeerChannel):
@@ -335,6 +392,7 @@ class TGInformer:
         async def message_event_handler(event):
             # 通过协程存储当前的新消息
             await self.message_dump(event)
+            
         #join_channel()
 
         async for dialog in self.client.iter_dialogs():
@@ -346,7 +404,6 @@ class TGInformer:
                'channel_title': e['channel_title'],
                'channel_url': e['channel_url'],
                'channel_size': e['channel_size'],
-               'channel_texpire': datetime.now() + timedelta(hours=3)
             }
 
             #self.dump_channel_info(e)
@@ -361,11 +418,6 @@ class TGInformer:
 
     def stop_bot_interval(self):
         self.bot_task.cancel()
-
-
-
-
-
 
     def check_informer_info(self):
         """ 

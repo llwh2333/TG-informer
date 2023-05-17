@@ -139,9 +139,6 @@ def init_db():
     ChatUser.metadata.create_all(engine)
     Channel.metadata.create_all(engine)
     Message.metadata.create_all(engine)
-    #Keyword.metadata.create_all(engine)
-    #Monitor.metadata.create_all(engine)
-    #Notification.metadata.create_all(engine)
 
     # 关闭 session 对象
     session.close()
@@ -159,8 +156,6 @@ def init_data():
     #初始化数据
     init_add_account()
     init_add_channels()
-    #init_add_keywords()
-    #init_add_monitors()
 
     session.close()
 
