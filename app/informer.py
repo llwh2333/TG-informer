@@ -22,6 +22,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from models import Account, Channel, ChatUser, Message
 import threading
 import json
+from telethon.tl import types
 
 """ 
 监控 tg
@@ -142,12 +143,25 @@ class TGInformer:
         """ 
         将 channel 信息存储到 json 文件中
         """ 
-        lock = threading.Lock()
         now = datetime.now()
-        file_data = now.strftime("%d_%m_%y")
-        json_file_name = file_data+'_channel_info.json'
+        file_date = now.strftime("%d_%m_%y")
+        json_file_name = file_date+'_channel_info.json'
 
-        self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info)
+        channel_info_data = {
+            'channel_id':channel_info['channel_id'],
+            'channel_name':channel_info['channel_name'],
+            'channel_title':channel_info['channel_title'],
+            'channel_url':channel_info['channel_url'],
+            'account_id':channel_info['account_id'],
+            'is_mega_group':channel_info['channel_is_mega_group'],
+            'is_group':channel_info['channel_is_group'],
+            'is_private':channel_info['channel_is_private'],
+            'is_broadcast':channel_info['channel_is_broadcast'],
+            'channel_access_hash':channel_info['channel_access_hash'],
+            'channel_size':channel_info['channel_size'],
+        }
+
+        self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info_data)
 
     def dump_channel_info(self,channel_info):
         """ 
@@ -233,6 +247,42 @@ class TGInformer:
 
         is_bot = False if message_obj.via_bot_id is None else True
 
+        mentioned_users = []
+        content = event.raw_text
+        for ent, txt in event.get_entities_text():
+            if isinstance(ent ,types.MessageEntityMention):
+                logging.info(f'get one mention member {txt}')
+
+        if mentioned_users == []:
+            is_mention = False
+        else:
+            is_mention = True
+
+        is_scheduled = True if message_obj.from_scheduled is True else False
+
+        is_fwd = False if message_obj.fwd_from is None else True
+        if is_fwd:
+            fwd_message_date = message_obj.fwd_from.date
+            fwd_message_send_name = message_obj.fwd_from.from_name
+            fwd_message_send_id = message_obj.fwd_from.from_id.user_id if message_obj.fwd_from.from_id.user_id is not None else None
+        else:
+            fwd_message_date = None
+            fwd_message_send_name = None
+            fwd_message_send_id = None
+
+        is_reply = False if message_obj.reply_to is None else True
+        if is_reply:
+            reply_obj = await event.get_reply_message()
+            reply_message_txt = reply_obj.message
+            reply_message_send_id = reply_obj.from_id.user_id if reply_obj.from_id.user_id is not None else None
+            reply_message_id = message_obj.reply_to.reply_to_msg_id 
+            reply_message_date = reply_obj.date
+        else:
+            reply_message_txt = None
+            reply_message_send_id = None
+            reply_message_id = None
+            reply_message_date = None
+
         message_info = {
             'message_id':event.message.id,
             'chat_user_id':event.sender_id,
@@ -244,7 +294,19 @@ class TGInformer:
             'message_is_group':is_group,
             'message_is_private':is_private,
             'message_is_channel':is_channel ,
-            'message_tcreate':datetime.now()
+            'message_tcreate':datetime.now(),
+            'is_mention':is_mention,
+            'mentioned_user':mentioned_users,
+            'is_scheduled':is_scheduled,
+            'is_fwd':is_fwd,
+            'fwd_message_date':fwd_message_date,
+            'fwd_message_send_id':fwd_message_send_id, 
+            'fwd_message_send_name':fwd_message_send_name,
+            'is_reply':is_reply,
+            'reply_message_txt':reply_message_txt,
+            'reply_message_send_id':reply_message_send_id, 
+            'reply_message_id':reply_message_id,
+            'reply_message_date':reply_message_date,
             }
         return message_info
 
@@ -281,14 +343,47 @@ class TGInformer:
         json_file_name = file_data+'_messages.json'
 
         new_message = {
+            'message_id':message_info['message_id'],
             'channel_id':message_info['channel_id'],
-            'message_data':message_info['message_text'],
+            'message_txt':message_info['message_text'],
             'sender_id':message_info['chat_user_id'],
+            'is_scheduled':message_info['is_scheduled'],
             'is_bot':message_info['message_is_bot'],
             'is_group':message_info['message_is_group'],
             'is_private':message_info['message_is_private'],
-            'is_channel':message_info['message_is_channel']
+            'is_channel':message_info['message_is_channel'],
+            'message_data':message_info['message_tcreate'].strftime('%Y %m %d:%H_%M_%S')
             }
+
+
+        if (message_info['is_fwd']):
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+                'fwd_message_send_id':message_info['fwd_message_send_id'],
+                'fwd_message_send_name':message_info['fwd_message_send_name'],
+                'fwd_message_date':message_info['fwd_message_date'].strftime('%Y %m %d:%H_%M_%S')
+            }
+        else:
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+            }
+        new_message.update(fwd_data)
+
+        if (message_info['is_reply']):
+            reply_data = {
+                'is_reply':message_info['is_reply'],
+                'reply_message_txt':message_info['reply_message_txt'],
+                'reply_message_send_id':message_info['reply_message_send_id'],
+                'reply_message_id':message_info['reply_message_id'],
+                'reply_message_date':message_info['reply_message_date'].strftime('%Y %m %d:%H %M %S')
+            }
+            pass
+        else:
+            reply_data = {
+                'is_reply':message_info['is_reply']
+            }
+        new_message.update(reply_data)
+
 
         self.store_data_in_json_file(json_file_name, self.lock_message, 'messages', new_message)
 
@@ -406,7 +501,7 @@ class TGInformer:
                'channel_size': e['channel_size'],
             }
 
-            #self.dump_channel_info(e)
+            self.dump_channel_info(e)
             #self.dump_channel_user_info(dialog)
 
         @self.client.on(events.ChatAction)
