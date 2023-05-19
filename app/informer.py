@@ -404,7 +404,7 @@ class TGInformer:
         获得图片文件名，用于存储
         """ 
         now = datetime.now()
-        file_data = now.strftime("%d_%m_%y")
+        file_data = now.strftime("%y_%m_%d")
         image_name = event.message.file.name
         if image_name == None:
             image_name='no_name'
@@ -456,7 +456,8 @@ class TGInformer:
             await self.download_file(event,file_path)
 
         message = event.raw_text
-
+        if message == None:
+            return 
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
             if channel_id == self.monitor_channel:
@@ -481,6 +482,10 @@ class TGInformer:
         初始化要监控的频道
         """ 
         logging.info('Running the monitor to channels')
+        picture_path = './picture'
+        if not os.path.exists(picture_path):
+            os.makedirs(picture_path)
+            logging.info(f'Create the picture dir:{picture_path}')
 
         # 处理新消息
         @self.client.on(events.NewMessage)
@@ -546,11 +551,10 @@ class TGInformer:
         logging.info(f'Logging in with account # {self.account.account_phone} ... \n')
 
         # 用来存储会话文件的地址，方便下一次的会话连接
-        #session_file = self.account.account_phone.replace('+', '' )+'.session'
-        logging.info('bot_name is the path')
+        session_file = self.account.account_phone.replace('+', '' )
 
         # 实例化一个 tg 端对象，初次登录会记录指定路径中，后续登录会直接使用以前的账户信息
-        self.client = TelegramClient('bot_name', self.account.account_api_id, self.account.account_api_hash)
+        self.client = TelegramClient(session_file, self.account.account_api_id, self.account.account_api_hash)
 
         # 异步的启动这个实例化的 tg 客户端对象，其中手机号为配置文件中的手机号
         await self.client.start(phone=f'{self.account.account_phone}')
