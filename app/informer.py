@@ -264,7 +264,14 @@ class TGInformer:
         if is_fwd:
             fwd_message_date = message_obj.fwd_from.date
             fwd_message_send_name = message_obj.fwd_from.from_name
-            fwd_message_send_id = message_obj.fwd_from.from_id.user_id if message_obj.fwd_from.from_id.user_id is not None else None
+            fwd_message_send_id = None
+            if message_obj.fwd_from.from_id is not None:
+                if isinstance(message_obj.fwd_from.from_id, PeerUser):
+                    fwd_message_send_id = message_obj.fwd_from.from_id.user_id
+                elif isinstance(message_obj.fwd_from.from_id, PeerChat):
+                    fwd_message_send_id = message_obj.fwd_from.from_id.chat_id
+                elif isinstance(message_obj.fwd_from.from_id, PeerChannel):
+                    fwd_message_send_id = message_obj.fwd_from.from_id.channel_id
         else:
             fwd_message_date = None
             fwd_message_send_name = None
@@ -274,7 +281,14 @@ class TGInformer:
         if is_reply:
             reply_obj = await event.get_reply_message()
             reply_message_txt = reply_obj.message
-            reply_message_send_id = reply_obj.from_id.user_id if reply_obj.from_id.user_id is not None else None
+            reply_message_send_id = None
+            if reply_obj.from_id is not None:
+                if isinstance(reply_obj.from_id, PeerUser):
+                    reply_message_send_id = reply_obj.from_id.user_id
+                elif isinstance(reply_obj.from_id, PeerChat):
+                    reply_message_send_id = reply_obj.from_id.chat_id
+                elif isinstance(reply_obj.from_id, PeerChannel):
+                    reply_message_send_id = reply_obj.from_id.channel_id
             reply_message_id = message_obj.reply_to.reply_to_msg_id 
             reply_message_date = reply_obj.date
         else:
@@ -352,7 +366,7 @@ class TGInformer:
             'is_group':message_info['message_is_group'],
             'is_private':message_info['message_is_private'],
             'is_channel':message_info['message_is_channel'],
-            'message_data':message_info['message_tcreate'].strftime('%Y %m %d:%H_%M_%S')
+            'message_data':message_info['message_tcreate'].strftime('%Y %m %d:%H %M %S')
             }
 
 
@@ -361,7 +375,7 @@ class TGInformer:
                 'is_fwd':message_info['is_fwd'],
                 'fwd_message_send_id':message_info['fwd_message_send_id'],
                 'fwd_message_send_name':message_info['fwd_message_send_name'],
-                'fwd_message_date':message_info['fwd_message_date'].strftime('%Y %m %d:%H_%M_%S')
+                'fwd_message_date':message_info['fwd_message_date'].strftime('%Y %m %d:%H %M %S')
             }
         else:
             fwd_data = {
@@ -456,18 +470,19 @@ class TGInformer:
             await self.download_file(event,file_path)
 
         message = event.raw_text
-        if message == None:
+        if message == '':
+            logging.info(f'skip the message{event.message.grouped_id};{event.message.id}')
             return 
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
             if channel_id == self.monitor_channel:
                 logging.info(f'the message is from monitor channel')
                 return
-            logging.info(f'........get the channel message is ({message})!!!!!!!!!!!!!!!')
+            logging.info(f'############### Get the channel message is ({message})!!!!!!!!!!!!!!!')
         # 如果是群组，获得群组的 id
         elif isinstance(event.message.to_id, PeerChat):
-            channel_id = event.message.chat_id
-            logging.info(f'........get the chat message is ({message})!!!!!!!!!!!!!!!')
+            channel_id = event.message.to_id.chat_id
+            logging.info(f'############### Get the chat message is ({message})!!!!!!!!!!!!!!!')
         else:
             # 两者均不是，跳过
             return
