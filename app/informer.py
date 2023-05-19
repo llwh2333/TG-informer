@@ -145,7 +145,7 @@ class TGInformer:
         """ 
         now = datetime.now()
         file_date = now.strftime("%d_%m_%y")
-        json_file_name = file_date+'_channel_info.json'
+        json_file_name = './channel_info/'+file_date+'_channel_info.json'
 
         channel_info_data = {
             'channel_id':channel_info['channel_id'],
@@ -215,7 +215,7 @@ class TGInformer:
         """ 
         now = datetime.now()
         file_data =  now.strftime("%d_%m_%y")
-        json_file_name = file_data+'_chat_user.json'
+        json_file_name = './user_info/'+file_data+'_chat_user.json'
 
         self.store_data_in_json_file(json_file_name, self.lock_chat_user, dialog.name,user_info_list)
 
@@ -354,7 +354,7 @@ class TGInformer:
         """
         now = datetime.now()
         file_data =  now.strftime("%d_%m_%y")
-        json_file_name = file_data+'_messages.json'
+        json_file_name = './message/'+file_data+'_messages.json'
 
         new_message = {
             'message_id':message_info['message_id'],
@@ -502,6 +502,21 @@ class TGInformer:
             os.makedirs(picture_path)
             logging.info(f'Create the picture dir:{picture_path}')
 
+        message_path = './message'
+        if not os.path.exists(message_path):
+            os.makedirs(message_path)
+            logging.info(f'Create the message dir:{message_path}')
+
+        channel_path = './channel_info'
+        if not os.path.exists(channel_path):
+            os.makedirs(channel_path)
+            logging.info(f'Create the channel info dir:{channel_path}')
+
+        user_path = './user_info'
+        if not os.path.exists(user_path):
+            os.makedirs(user_path)
+            logging.info(f'Create the user info dir:{user_path}')
+
         # 处理新消息
         @self.client.on(events.NewMessage)
         async def message_event_handler(event):
@@ -556,7 +571,7 @@ class TGInformer:
                     'channel name':dialog.name
                     })
                 count +=1
-                logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
+        logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
         logging.info(f'Count:{count}')
 
     async def bot_interval(self):
@@ -566,7 +581,7 @@ class TGInformer:
         logging.info(f'Logging in with account # {self.account.account_phone} ... \n')
 
         # 用来存储会话文件的地址，方便下一次的会话连接
-        session_file = self.account.account_phone.replace('+', '' )
+        session_file = self.account.account_phone
 
         # 实例化一个 tg 端对象，初次登录会记录指定路径中，后续登录会直接使用以前的账户信息
         self.client = TelegramClient(session_file, self.account.account_api_id, self.account.account_api_hash)
