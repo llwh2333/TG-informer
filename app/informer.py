@@ -619,7 +619,7 @@ class TGInformer:
         将获得的 user 列表信息存储到本地 json 中
         """ 
         now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
+        file_data =  now.strftime("%y_%m_%d")
         json_file_name = './user_info/'+file_data+'_chat_user.json'
 
         self.store_data_in_json_file(json_file_name, self.lock_chat_user, dialog.name,user_info_list)
