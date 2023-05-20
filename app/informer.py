@@ -17,7 +17,7 @@ from telethon import TelegramClient, events
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
 from telethon.tl.functions.channels import  JoinChannelRequest
-from telethon.tl.functions.messages import ImportChatInviteRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
 from oauth2client.service_account import ServiceAccountCredentials
 from models import Account, Channel, ChatUser, Message
 import threading
@@ -492,7 +492,7 @@ class TGInformer:
     def flush_status_in_sql(self,message_info):
         """ 
         根据 message 更新一些状态信息
-        用户的登录时间
+        用户的登录时间（未检查过这个函数运行是否正确）
         """ 
         status_session = self.Session()
         user_object = status_session.query(ChatUser).filter_by(chat_user_id=message_info['chat_user_id']).first()
@@ -510,8 +510,13 @@ class TGInformer:
         channel_url = 'unknown'
 
         channel_access_hash = None
+        is_private = True
         if dialog.is_channel:
             channel_access_hash = dialog.entity.access_hash
+            if dialog.entity.username is not None:
+                is_private = False
+            else:
+                is_private = True
 
         #后面调用函数获得 channel 大小
         channel_size = 0
@@ -520,13 +525,13 @@ class TGInformer:
             'channel_id':dialog.id if dialog.id else None,
             'channel_name':dialog.name if dialog.name else None,
             'channel_title':dialog.title if dialog.title else None,
-            'channel_url':channel_url,
             'account_id':self.account.account_id,
-            'channel_is_mega_group':True if dialog.is_group and dialog.is_channel else False ,
-            'channel_is_group':dialog.is_group,
-            'channel_is_private':None,
-            'channel_is_broadcast':dialog.is_channel,
-            'channel_access_hash':channel_access_hash,
+            'is_mega_group':True if dialog.is_group and dialog.is_channel else False ,
+            'is_group':dialog.is_group,
+            'channel_url':channel_url,
+            'is_private':is_private,
+            'is_broadcast':dialog.is_channel,
+            'access_hash':channel_access_hash,
             'channel_size':channel_size,
             }
         return channel_info
@@ -543,7 +548,7 @@ class TGInformer:
         将 channel 信息存储到 json 文件中
         """ 
         now = datetime.now()
-        file_date = now.strftime("%d_%m_%y")
+        file_date = now.strftime("%y_%m_%d")
         json_file_name = './channel_info/'+file_date+'_channel_info.json'
 
         channel_info_data = {
@@ -552,15 +557,15 @@ class TGInformer:
             'channel_title':channel_info['channel_title'],
             'channel_url':channel_info['channel_url'],
             'account_id':channel_info['account_id'],
-            'is_mega_group':channel_info['channel_is_mega_group'],
-            'is_group':channel_info['channel_is_group'],
-            'is_private':channel_info['channel_is_private'],
-            'is_broadcast':channel_info['channel_is_broadcast'],
-            'channel_access_hash':channel_info['channel_access_hash'],
+            'is_mega_group':channel_info['is_mega_group'],
+            'is_group':channel_info['is_group'],
+            'is_private':channel_info['is_private'],
+            'is_broadcast':channel_info['is_broadcast'],
+            'channel_access_hash':channel_info['access_hash'],
             'channel_size':channel_info['channel_size'],
         }
 
-        self.store_data_in_json_file(json_file_name, self.lock_channel,channel_info['account_id'], channel_info_data)
+        self.store_data_in_json_file(json_file_name, self.lock_channel,str(channel_info['account_id']), channel_info_data)
 
     def dump_channel_user_info(self,dialog):
         """ 
