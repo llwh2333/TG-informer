@@ -166,7 +166,7 @@ class TGInformer:
                     'channel name':dialog.name
                     })
                 count +=1
-        logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list, indent=4)}')
+        logging.info(f'{sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(channel_list,ensure_ascii=False,indent=4)}')
         logging.info(f'Count:{count}')
 
     def check_informer_info(self):
@@ -227,8 +227,8 @@ class TGInformer:
         async def channel_action_handler(event):
             await self.updata_channel_user_info(event)
 
-        logging.info(f"{sys._getframe().f_code.co_name}: Monitoring channels: {json.dumps(self.channel_list, indent=4)}")
-        logging.info(f'Channel METADATA: {self.channel_meta}')
+        logging.info(f"{sys._getframe().f_code.co_name}: Monitoring channels: {json.dumps(self.channel_list,ensure_ascii=False,indent=4)}")
+        logging.info(f'Channel METADATA: {json.dumps(self.channel_meta,ensure_ascii=False,indent=4)}')
 
     def stop_bot_interval(self):
         self.bot_task.cancel()
@@ -271,13 +271,9 @@ class TGInformer:
 
         message = event.raw_text
         if message == '':
-            logging.info(f'skip the message{event.message.grouped_id};{event.message.id}')
             return 
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
-            if channel_id == self.monitor_channel:
-                logging.info(f'the message is from monitor channel')
-                return
             logging.info(f'############### Get the channel message is ({message})!!!!!!!!!!!!!!!')
         # 如果是群组，获得群组的 id
         elif isinstance(event.message.to_id, PeerChat):
@@ -317,6 +313,7 @@ class TGInformer:
         for ent, txt in event.get_entities_text():
             if isinstance(ent ,types.MessageEntityMention):
                 logging.info(f'get one mention member {txt}')
+                mentioned_users.append(txt)
 
         if mentioned_users == []:
             is_mention = False
@@ -329,6 +326,8 @@ class TGInformer:
         if is_fwd:
             fwd_message_date = message_obj.fwd_from.date
             fwd_message_send_name = message_obj.fwd_from.from_name
+            fwd_message_times = message_obj.forwards
+            fwd_message_saved_id = message_obj.fwd_from.saved_from_msg_id
             fwd_message_send_id = None
             if message_obj.fwd_from.from_id is not None:
                 if isinstance(message_obj.fwd_from.from_id, PeerUser):
@@ -341,6 +340,8 @@ class TGInformer:
             fwd_message_date = None
             fwd_message_send_name = None
             fwd_message_send_id = None
+            fwd_message_saved_id = None
+            fwd_message_times = None
 
         is_reply = False if message_obj.reply_to is None else True
         if is_reply:
@@ -356,11 +357,13 @@ class TGInformer:
                     reply_message_send_id = reply_obj.from_id.channel_id
             reply_message_id = message_obj.reply_to.reply_to_msg_id 
             reply_message_date = reply_obj.date
+            reply_message_times = message_obj.replies
         else:
             reply_message_txt = None
             reply_message_send_id = None
             reply_message_id = None
             reply_message_date = None
+            reply_message_times = None
 
         message_info = {
             'message_id':event.message.id,
@@ -381,11 +384,14 @@ class TGInformer:
             'fwd_message_date':fwd_message_date,
             'fwd_message_send_id':fwd_message_send_id, 
             'fwd_message_send_name':fwd_message_send_name,
+            'fwd_message_saved_id':fwd_message_saved_id,
+            'fwd_message_times':fwd_message_times,
             'is_reply':is_reply,
             'reply_message_txt':reply_message_txt,
             'reply_message_send_id':reply_message_send_id, 
             'reply_message_id':reply_message_id,
             'reply_message_date':reply_message_date,
+            'reply_message_times':reply_message_times,
             }
         return message_info
 
@@ -394,7 +400,7 @@ class TGInformer:
         将获得的消息信息，存入json 文件中
         """
         now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
+        file_data =  now.strftime("%y_%m_%d")
         json_file_name = './message/'+file_data+'_messages.json'
 
         new_message = {
@@ -409,13 +415,24 @@ class TGInformer:
             'is_channel':message_info['message_is_channel'],
             'message_data':message_info['message_tcreate'].strftime('%Y %m %d:%H %M %S')
             }
-
+        if (message_info['is_mention']):
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+                'mentioned_user_name':message_info['mentioned_user']
+            }
+        else:
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+            }
+        new_message.update(mention_data)
 
         if (message_info['is_fwd']):
             fwd_data = {
                 'is_fwd':message_info['is_fwd'],
                 'fwd_message_send_id':message_info['fwd_message_send_id'],
                 'fwd_message_send_name':message_info['fwd_message_send_name'],
+                'fwd_message_times':message_info['fwd_message_times'],
+                'fwd_message_saved_id':message_info['fwd_message_saved_id'],
                 'fwd_message_date':message_info['fwd_message_date'].strftime('%Y %m %d:%H %M %S')
             }
         else:
@@ -430,9 +447,9 @@ class TGInformer:
                 'reply_message_txt':message_info['reply_message_txt'],
                 'reply_message_send_id':message_info['reply_message_send_id'],
                 'reply_message_id':message_info['reply_message_id'],
+                'reply_message_times':message_info['reply_message_times'],
                 'reply_message_date':message_info['reply_message_date'].strftime('%Y %m %d:%H %M %S')
             }
-            pass
         else:
             reply_data = {
                 'is_reply':message_info['is_reply']
@@ -461,11 +478,15 @@ class TGInformer:
         获得图片文件名，用于存储
         """ 
         now = datetime.now()
-        file_data = now.strftime("%y_%m_%d")
-        image_name = event.message.file.name
-        if image_name == None:
-            image_name='no_name'
-        file_name = file_data+image_name+str(event.sender_id)
+        file_data = now.strftime("%y_%m_%d_")
+        if isinstance(event.message.to_id, PeerChannel):
+            channel_id = event.message.to_id.channel_id
+        elif isinstance(event.message.to_id, PeerChat):
+            channel_id = event.message.to_id.chat_id
+        else:
+            return
+        image_name = str(channel_id)+'_'+str(event.message.id)+'_'+str(event.message.grouped_id)
+        file_name = file_data+image_name
         return file_name
 
     def flush_status_in_sql(self,message_info):
