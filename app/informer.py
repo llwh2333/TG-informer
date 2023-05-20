@@ -271,13 +271,9 @@ class TGInformer:
 
         message = event.raw_text
         if message == '':
-            logging.info(f'skip the message{event.message.grouped_id};{event.message.id}')
             return 
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
-            if channel_id == self.monitor_channel:
-                logging.info(f'the message is from monitor channel')
-                return
             logging.info(f'############### Get the channel message is ({message})!!!!!!!!!!!!!!!')
         # 如果是群组，获得群组的 id
         elif isinstance(event.message.to_id, PeerChat):
@@ -404,7 +400,7 @@ class TGInformer:
         将获得的消息信息，存入json 文件中
         """
         now = datetime.now()
-        file_data =  now.strftime("%d_%m_%y")
+        file_data =  now.strftime("%y_%m_%d")
         json_file_name = './message/'+file_data+'_messages.json'
 
         new_message = {
@@ -482,11 +478,15 @@ class TGInformer:
         获得图片文件名，用于存储
         """ 
         now = datetime.now()
-        file_data = now.strftime("%y_%m_%d")
-        image_name = event.message.file.name
-        if image_name == None:
-            image_name='no_name'
-        file_name = file_data+image_name+str(event.sender_id)
+        file_data = now.strftime("%y_%m_%d_")
+        if isinstance(event.message.to_id, PeerChannel):
+            channel_id = event.message.to_id.channel_id
+        elif isinstance(event.message.to_id, PeerChat):
+            channel_id = event.message.to_id.chat_id
+        else:
+            return
+        image_name = str(channel_id)+'_'+str(event.message.id)+'_'+str(event.message.grouped_id)
+        file_name = file_data+image_name
         return file_name
 
     def flush_status_in_sql(self,message_info):
