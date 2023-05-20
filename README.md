@@ -11,19 +11,22 @@
 - [x] is_group
 - [x] is_private
 - [x] is_channel
-- [ ] is_mention
-- [ ] mentioned_account_id
+- [x] is_mention
+- [x] mentioned_user_name
 - [x] is_scheduled
 - [x] is_fwd
 - [x] fwd_message_date
 - [x] fwd_message_send_name 
 - [x] fwd_message_send_id
+- [x] fwd_message_saved_id
+- [x] fwd_message_times
 - [x] is_bot
 - [x] is_reply
 - [x] reply_message_txt
 - [x] reply_message_send_id
 - [x] reply_message_id
 - [x] reply_message_date
+- [x] reply_message_times
 - [ ] message_comment (difficult)
 
 
