@@ -41,8 +41,8 @@
 - [x] is_broadcast
 - [x] is_group
 - [x] is_mege_group
-- [ ] is_private
-- [ ] access_hash
+- [x] is_private
+- [x] access_hash
 - [ ] channel_size
 
 
