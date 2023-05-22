@@ -652,8 +652,7 @@ class TGInformer:
                 'modified':user['modified'],
                 'access_hash':user['access_hash'],
             }
-
-
+            users_info.append(user_info)
         self.store_data_in_json_file(json_file_name, self.lock_chat_user, str(dialog.id),users_info)
 
 
