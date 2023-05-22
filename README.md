@@ -49,18 +49,18 @@
 
 # User
 
-- [ ] user_id
-- [ ] user_name
-- [ ] is_bot
-- [ ] account_is_verified
+- [x] user_id
+- [x] user_name
+- [x] is_bot
+- [x] account_is_verified
 - [ ] verified_content
-- [ ] is_restricted
-- [ ] first_name
-- [ ] last_name
-- [ ] user_name
-- [ ] phone
-- [ ] chat_user_tmodified
-- [ ] log_time
+- [x] is_restricted
+- [x] first_name
+- [x] last_name
+- [x] user_name
+- [x] phone
+- [x] chat_user_tmodified
+- [x] log_time
 
 
 

@@ -1,3 +1,4 @@
+#See:https://github.com/paulpierre/informer
 import sys
 import os
 import json
@@ -14,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError, InterfaceError, ProgrammingError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon import TelegramClient, events
-from telethon.tl.types import PeerUser, PeerChat, PeerChannel
+from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
@@ -221,7 +222,8 @@ class TGInformer:
             }
 
             self.dump_channel_info(e)
-            #self.dump_channel_user_info(dialog)
+            if dialog.is_channel or dialog.is_group:
+                await self.dump_channel_user_info(dialog)
 
         @self.client.on(events.ChatAction)
         async def channel_action_handler(event):
@@ -519,7 +521,7 @@ class TGInformer:
                 is_private = True
 
         #后面调用函数获得 channel 大小
-        channel_size = 0
+        channel_size = self.get_channel_user_count(dialog)
 
         channel_info = {
             'channel_id':dialog.id if dialog.id else None,
@@ -567,29 +569,35 @@ class TGInformer:
 
         self.store_data_in_json_file(json_file_name, self.lock_channel,str(channel_info['account_id']), channel_info_data)
 
-    def dump_channel_user_info(self,dialog):
+    async def dump_channel_user_info(self,dialog):
         """ 
         将会话的所有成员的信息存储下来
         """ 
-        e = self.get_user_info_from_dialog(dialog)
+        e = await self.get_user_info_from_dialog(dialog)
+        if e == None:
+            return 
         self.store_user_info_in_json_file(e,dialog)
+        logging.info('finish one user info')
         self.store_user_info_in_sql(e,dialog)
 
-    def get_user_info_from_dialog(self,dialog):
+    async def get_user_info_from_dialog(self,dialog):
         """ 
         获取当前会话的所有成员信息
         （之前有一些 bug 等后面排除）
         """ 
         
-        users_info_list = {}
-        if str(abs(dialog.id))[:3] == '100':
-            channel_id =dialog.id
-        else :
-            channel_id = int('-100'+str(abs(dialog.id)))
-        channel = self.client.get_entity(PeerChat(channel_id))
-        users = self.client.get_participants(channel)
+        users_info_list = []
+        if str(abs(dialog.id))[:3] != '100':
+            return None
+        channel_id = dialog.id
+        if dialog.is_channel:
+            channel = await self.client.get_entity(PeerChannel(channel_id))
+        elif dialog.is_group:
+            channel = await self.client.get_entity(PeerChat(channel_id))
+        users = await self.client.get_participants(dialog.id)
         count = 0
         for user in users:
+            user_id = user.id
             user_name = user.username
             first_name = user.first_name
             last_name = user.last_name
@@ -597,9 +605,14 @@ class TGInformer:
             user_phone = user.phone
             is_verified = user.verified
             is_restricted = user.restricted
+            access_hash = user.access_hash
             tlogin = None
+            if  isinstance(user.participant,ChannelParticipant):
+                tlogin = user.participant.date
             modified = None
+
             user_info={
+                'user_id':user_id,
                 'user_name' : user_name,
                 'first_name' : first_name,
                 'last_name': last_name,
@@ -607,11 +620,14 @@ class TGInformer:
                 'is_verified': is_verified,
                 'is_restricted': is_restricted,
                 'user_phone':user_phone,
-                'tlogin':None,
-                'modified':None,
+                'tlogin':tlogin,
+                'modified':modified,
+                'access_hash':access_hash,
             }
-            users_info_list[str(user_info['first_name']+user_info['last_name']+str(count))] = user_info
+
+            users_info_list.append(user_info)
             count += 1
+        logging.info(f'Logging the users account {count} ... \n')
         return users_info_list
 
     def store_user_info_in_json_file(self,user_info_list,dialog):
@@ -621,8 +637,24 @@ class TGInformer:
         now = datetime.now()
         file_data =  now.strftime("%y_%m_%d")
         json_file_name = './user_info/'+file_data+'_chat_user.json'
+        users_info = []
+        for user in user_info_list:
+            user_info={
+                'user_id':user['user_id'],
+                'user_name' :user['user_name'],
+                'first_name' :user['first_name'] ,
+                'last_name':user['first_name'] ,
+                'is_bot':user['is_bot'] ,
+                'is_verified': user['is_verified'],
+                'is_restricted': user['is_restricted'],
+                'user_phone':user['user_phone'],
+                'tlogin':user['tlogin'].strftime('%Y %m %d:%H %M %S') if user['tlogin'] is not None else None,
+                'modified':user['modified'],
+                'access_hash':user['access_hash'],
+            }
 
-        self.store_data_in_json_file(json_file_name, self.lock_chat_user, dialog.name,user_info_list)
+
+        self.store_data_in_json_file(json_file_name, self.lock_chat_user, str(dialog.id),users_info)
 
 
 
@@ -665,11 +697,16 @@ class TGInformer:
         """ 
         pass
 
-    async def get_channel_user_count(self,channel_id):
+    def get_channel_user_count(self,dialog):
         """ 
         获得 channel 的用户人数
         """ 
-        return 0
+        size = 0
+        if dialog.is_channel:
+            size = dialog.entity.participants_count
+        elif dialog.is_group:
+            size = dialog.entity.participants_count
+        return size
 
     def updata_channel_user_info(self,event):
         """ 
