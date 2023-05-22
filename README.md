@@ -43,7 +43,7 @@
 - [x] is_mege_group
 - [x] is_private
 - [x] access_hash
-- [ ] channel_size
+- [x] channel_size
 
 
 
