@@ -57,7 +57,6 @@ class TGInformer:
         ): 
 
         # 实例变量
-        self.channel_list = []                      # 当前已加入的 channel
         self.channel_meta = {}                      # 已加入 channel 的信息
         self.bot_task = None
         self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
@@ -138,10 +137,8 @@ class TGInformer:
 
         # 统计 channel 数量和初始化监控频道
         # await self.init_keywords()
-        await self.channel_count()
         await self.init_monitor_channels()
         
-
         # 循环
         count = 0
         while True:
@@ -211,25 +208,21 @@ class TGInformer:
         #join_channel()
 
         async for dialog in self.client.iter_dialogs():
-            e = await self.get_channel_info_by_dialog(dialog)
-            self.channel_list.append(e['channel_id'])
-
-            self.channel_meta[e['channel_id']] = {
-               'channel_id': e['channel_id'],
-               'channel_title': e['channel_title'],
-               'channel_url': e['channel_url'],
-               'channel_size': e['channel_size'],
-            }
-
-            self.dump_channel_info(e)
             if dialog.is_channel or dialog.is_group:
+                e = await self.get_channel_info_by_dialog(dialog)
+                self.channel_meta[e['channel_id']] = {
+                   'channel_id': e['channel_id'],
+                   'channel_title': e['channel_title'],
+                   'channel_url': e['channel_url'],
+                   'channel_size': e['channel_size'],
+                }
+                self.dump_channel_info(e)
                 await self.dump_channel_user_info(dialog)
 
         @self.client.on(events.ChatAction)
         async def channel_action_handler(event):
             await self.updata_channel_user_info(event)
 
-        logging.info(f"{sys._getframe().f_code.co_name}: Monitoring channels: {json.dumps(self.channel_list,ensure_ascii=False,indent=4)}")
         logging.info(f'Channel METADATA: {json.dumps(self.channel_meta,ensure_ascii=False,indent=4)}')
 
     def stop_bot_interval(self):
@@ -265,7 +258,6 @@ class TGInformer:
         """ 
 
         #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
-        #图片名称：time_message_id
         if event.message.media is not None:
             file_path = './picture'
             logging.info(f'the message have media')
@@ -506,7 +498,6 @@ class TGInformer:
     async def get_channel_info_by_dialog(self,dialog):
         """ 
         从会话中获得 channel 的信息
-        （待完善）
         """ 
         #后面看看怎么获取到 url
         channel_url = 'unknown'
@@ -520,7 +511,6 @@ class TGInformer:
             else:
                 is_private = True
 
-        #后面调用函数获得 channel 大小
         channel_size = self.get_channel_user_count(dialog)
 
         channel_info = {
@@ -577,23 +567,16 @@ class TGInformer:
         if e == None:
             return 
         self.store_user_info_in_json_file(e,dialog)
-        logging.info('finish one user info')
         self.store_user_info_in_sql(e,dialog)
 
     async def get_user_info_from_dialog(self,dialog):
         """ 
         获取当前会话的所有成员信息
-        （之前有一些 bug 等后面排除）
         """ 
         
         users_info_list = []
-        if str(abs(dialog.id))[:3] != '100':
+        if dialog.is_channel :
             return None
-        channel_id = dialog.id
-        if dialog.is_channel:
-            channel = await self.client.get_entity(PeerChannel(channel_id))
-        elif dialog.is_group:
-            channel = await self.client.get_entity(PeerChat(channel_id))
         users = await self.client.get_participants(dialog.id)
         count = 0
         for user in users:
@@ -711,9 +694,3 @@ class TGInformer:
         """ 
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
-
-    def updata_channel_user_info(self,event):
-        """ 
-        TODO: 根据 channel 的成员变动事件，更新 channel 成员
-        """ 
-
