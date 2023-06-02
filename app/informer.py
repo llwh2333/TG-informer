@@ -16,15 +16,12 @@ from sqlalchemy.exc import IntegrityError, InterfaceError, ProgrammingError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon import TelegramClient, events
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant
-from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
-from telethon.tl.functions.channels import  JoinChannelRequest
-from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
-from oauth2client.service_account import ServiceAccountCredentials
+
 from models import Account, Channel, ChatUser, Message
 import threading
 import json
 from telethon.tl import types
-
+from telethon.tl.functions.channels import GetFullChannelRequest
 """ 
 监控 tg
 """ 
