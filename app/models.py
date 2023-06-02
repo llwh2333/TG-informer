@@ -58,7 +58,8 @@ class ChatUser(Base):
     """ 
     __tablename__ = 'chat_user'
     id = Column(BigInteger, primary_key=True, index=True)
-    chat_user_id = Column(BigInteger, unique=True, index=True, nullable=False)      # 参与者 id
+    chat_user_id = Column(BigInteger, index=True, nullable=False)      # 参与者 id
+    channel_id = Column(BigInteger,ForeignKey("channel.channel_id")) 
 
     chat_user_name = Column(String(100), default=None)                              # 参与者账户用户名
     chat_user_first_name = Column(String(50), default=None)                         # 参与者昵称
@@ -90,11 +91,11 @@ class Message(Base):
     message_is_scheduled = Column(Boolean(), default=None)                                  # 是否预设发送
     message_is_fwd = Column(Boolean(), default=None)                                        # 是否转发消息
     fwd_message_txt = Column(String(1000), default=None)
-    fwd_message_seed_id =  Column(BigInteger, default=None)
+    fwd_message_send_id =  Column(BigInteger, default=None)
     fwd_message_date = Column(DateTime, default=None)
     message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
     reply_message_txt = Column(String(1000), default=None)
-    reply_message_seed_id  = Column(BigInteger,default=None)
+    reply_message_send_id  = Column(BigInteger,default=None)
     reply_message_date = Column(DateTime, default=None)
     message_is_bot = Column(Boolean(), default=None)                                        # 是否机器人发出                                                                                                                                                                                                                       
     message_is_group = Column(Boolean(), default=None)
