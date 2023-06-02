@@ -23,7 +23,7 @@ class Account(Base):
     account_is_restricted = Column(Boolean(), default=None)             # 是否受限账户
     account_first_name = Column(String(50), default=None)               # 账户昵称
     account_last_name = Column(String(50), default=None)
-    account_user_name = Column(String(100), default=None, nullable=False)       #傀儡账户用户名
+    account_user_name = Column(String(100), default=None, nullable=False)       # 傀儡账户用户名
     account_phone = Column(String(25), unique=True, default=None, nullable=False)       # 手机号
     account_tlogin = Column(DateTime, default=None) 
     account_is_enabled = Column(Boolean(), default=True)
@@ -36,8 +36,7 @@ class Channel(Base):
     tg 用户所在的 channel
     """ 
     __tablename__ = 'channel'
-    id = Column(BigInteger, primary_key=True, index=True)
-    channel_id = Column(BigInteger, unique=True, index=True, nullable=True)             # 频道 id
+    channel_id = Column(BigInteger, primary_key=True, unique=True, index=True, nullable=True)             # 频道 id
     channel_name = Column(String(256), default=None, nullable=True)                     # 频道名称（系统分配）
     channel_title = Column(String(256), default=None, nullable=True)                    # 频道公开
     channel_url = Column(String(256), nullable=True)                                    # 频道地址
@@ -81,24 +80,29 @@ class Message(Base):
     """
     __tablename__ = 'message'
     message_id = Column(BigInteger, primary_key=True, index=True)                           # 消息的 id
-    chat_user_id = Column(BigInteger,nullable=False)      # 消息发送者 id
+    chat_user_id = Column(BigInteger, nullable=False)      # 消息发送者 id
     account_id = Column(BigInteger,  nullable=False)       # 傀儡账户 id
     channel_id = Column(BigInteger, nullable=False)       # 频道的 id
-    message_text = Column(String(1000), default=None)                                      # 消息内容
-    message_is_mention = Column(Boolean(), default=None)                                    # 是否提及他人
-    message_mentioned_user_id = Column(BigInteger,default=None)
-    message_is_scheduled = Column(Boolean(), default=None)                                  # 是否预设发送
-    message_is_fwd = Column(Boolean(), default=None)                                        # 是否转发消息
-    fwd_message_txt = Column(String(1000), default=None)
-    fwd_message_seed_id =  Column(BigInteger, default=None)
-    fwd_message_date = Column(DateTime, default=None)
-    message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
-    reply_message_txt = Column(String(1000), default=None)
-    reply_message_seed_id  = Column(BigInteger,default=None)
-    reply_message_date = Column(DateTime, default=None)
-    message_is_bot = Column(Boolean(), default=None)                                        # 是否机器人发出                                                                                                                                                                                                                       
+    message_text = Column(String(1000), default=None)  # 消息内容
+    message_is_bot = Column(Boolean(), default=None)                                        # 是否机器人发出
     message_is_group = Column(Boolean(), default=None)
     message_is_private = Column(Boolean(), default=None)
     message_is_channel = Column(Boolean(), default=None)
-    message_channel_size = Column(Integer, default=None)
     message_tcreate = Column(DateTime, default=datetime.now())
+    message_is_mention = Column(Boolean(), default=None)                                    # 是否提及他人
+    message_mention_user = Column(String(100), default=None)
+    message_mentioned_user_id = Column(String(300), default=None)
+    message_is_scheduled = Column(Boolean(), default=None)                                  # 是否预设发送
+    message_is_fwd = Column(Boolean(), default=None)                                        # 是否转发消息
+    fwd_message_txt = Column(String(1000), default=None)
+    fwd_message_send_id = Column(BigInteger, default=None)
+    fwd_message_send_name = Column(String(100), default=None)
+    fwd_message_saved_id = Column(String(300), default=None)
+    fwd_message_times = Column(DateTime, default=None)
+    fwd_message_date = Column(DateTime, default=None)
+    message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
+    reply_message_txt = Column(String(1000), default=None)
+    reply_message_id = Column(BigInteger, default=None)
+    reply_message_send_id = Column(BigInteger, default=None)
+    reply_message_date = Column(DateTime, default=None)
+    reply_message_times = Column(DateTime, default=None)
