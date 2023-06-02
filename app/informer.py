@@ -341,7 +341,7 @@ class TGInformer:
         is_reply = False if message_obj.reply_to is None else True
         if is_reply:
             reply_obj = await event.get_reply_message()
-            reply_message_txt = reply_obj.message
+            reply_message_txt = reply_obj.message if reply_obj else ''
             reply_message_send_id = None
             if reply_obj.from_id is not None:
                 if isinstance(reply_obj.from_id, PeerUser):
@@ -389,7 +389,7 @@ class TGInformer:
             'reply_message_id':reply_message_id,
             'reply_message_date':reply_message_date,
             'reply_message_times':reply_message_times,
-            'message_channel_size':0
+            'message_channel_size':await self.get_channel_users_count(channel_id)
             }
         return message_info
 
@@ -626,14 +626,16 @@ class TGInformer:
 
         return users_info_list
     
-        async def get_channel_user_count(self, channel_id):
+    async def get_channel_users_count(self, channel_id):
 
-            data = await self.client.get_entity(int(channel_id))
+            if isinstance(channel_id, PeerChat):
+                channel = await self.client.get_entity(int(channel_id))
 
-            channel_info = await self.client(GetFullChannelRequest(channel=data))
-            # 频道订阅数
-            subscriber_count = channel_info.full_chat.participants_count
-
+                channel_info = await self.client(GetFullChannelRequest(channel=channel))
+                # 频道订阅数
+                subscriber_count = channel_info.full_chat.participants_count
+            else:
+                subscriber_count = 0
 
             return subscriber_count
 
