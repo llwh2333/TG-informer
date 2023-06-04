@@ -216,7 +216,8 @@ class TGInformer:
                 }
         
                 self.dump_channel_info(e)
-                await self.dump_channel_user_info(dialog)
+                # await self.dump_channel_user_info(dialog)
+        await self.dump_channel_user_info()
 
         @self.client.on(events.ChatAction)
         async def channel_action_handler(event):
@@ -560,16 +561,32 @@ class TGInformer:
 
         self.store_data_in_json_file(json_file_name, self.lock_channel,str(channel_info['account_id']), channel_info_data)
 
-    async def dump_channel_user_info(self,dialog):
+    # 老版本，跟随获取channel的同时下载用户信息，
+    # 但是用户信息太多导致请求崩溃
+    # async def dump_channel_user_info(self,dialog):
+    #     """ 
+    #     将会话的所有成员的信息存储下来
+    #     """ 
+        
+    #     e = await self.get_user_info_from_dialog(dialog)
+    #     if e == None:
+    #         return 
+    #     self.store_user_info_in_json_file(e,dialog)
+    #     self.store_user_info_in_sql(e,dialog)
+
+    # 由于群组用户太多，改为独立获取用户信息
+    async def dump_channel_user_info(self):
         """ 
         将会话的所有成员的信息存储下来
         """ 
-        
-        e = await self.get_user_info_from_dialog(dialog)
-        if e == None:
-            return 
-        self.store_user_info_in_json_file(e,dialog)
-        self.store_user_info_in_sql(e,dialog)
+        async for dialog in self.client.iter_dialogs():
+            e = await self.get_user_info_from_dialog(dialog)
+            if e == None:
+                return 
+            self.store_user_info_in_json_file(e,dialog)
+            self.store_user_info_in_sql(e,dialog)
+            await asyncio.sleep(30)
+
 
     async def get_user_info_from_dialog(self,dialog):
         """ 
@@ -585,7 +602,7 @@ class TGInformer:
 
         count = 0
 
-        async for user in self.client.iter_participants(dialog,limit=200):
+        async for user in self.client.iter_participants(dialog, aggressive = True):
             print("{} : {}".format(user.id,user.username))
         # for user in users:
             user_id = user.id
