@@ -13,7 +13,7 @@ from random import randrange
 from telethon import utils
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError, InterfaceError, ProgrammingError
-from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.functions.users import GetFullUserRequest,GetFullChannelRequest
 from telethon import TelegramClient, events
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
@@ -588,8 +588,8 @@ class TGInformer:
 
         count = 0
 
-        async for user in self.client.iter_participants(dialog,limit=200):
-            print("{} : {}".format(user.id,user.username))
+        async for user in self.client.iter_participants(dialog, aggressive=True):
+            # print("{} : {}".format(user.id,user.username))
         # for user in users:
             user_id = user.id
             user_name = user.username
@@ -625,17 +625,6 @@ class TGInformer:
         logging.info(f'Logging the users account {count} ... \n')
 
         return users_info_list
-    
-        async def get_channel_user_count(self, channel_id):
-
-            data = await self.client.get_entity(int(channel_id))
-
-            channel_info = await self.client(GetFullChannelRequest(channel=data))
-            # 频道订阅数
-            subscriber_count = channel_info.full_chat.participants_count
-
-
-            return subscriber_count
 
     def store_user_info_in_json_file(self,user_info_list,dialog):
         """ 
@@ -663,10 +652,6 @@ class TGInformer:
         self.store_data_in_json_file(json_file_name, self.lock_chat_user, str(dialog.id),users_info)
 
 
-
-
-
-
     def check_channels_user_info_in_sql(self):
         """ 
         TODO: 将 sql 中的 channel 参与者信息与 account 中的保持一致 
@@ -684,33 +669,7 @@ class TGInformer:
         TODO:将获得的消息信息存储进入 sql 中(暂时不弄)
         """
 
-        message = Message(message_id = message_info['message_id'],
-                            chat_user_id = message_info['chat_user_id'],
-                            account_id = message_info['account_id'],
-                            channel_id = message_info['channel_id'],
-                            message_text = message_info['message_text'],
-                            message_is_mention = message_info['is_mention'],
-                            message_mentioned_user_id = message_info['mentioned_user'],
-                            message_is_scheduled = message_info['message_is_scheduled'],
-                            message_is_fwd = message_info['is_fwd'],
-                            fwd_message_txt = message_info['fwd_message_txt'],
-                            fwd_message_send_id = message_info['fwd_message_send_id'],
-                            fwd_message_date = message_info['fwd_message_date'],
-                            message_is_reply = message_info['is_reply'],
-                            reply_message_txt = message_info['reply_message_txt'],
-                            reply_message_send_id = message_info['reply_message_send_id'],
-                            reply_message_date = message_info['reply_message_date'],
-                            message_is_bot = message_info['message_is_bot'],
-                            message_is_group = message_info['message_is_group'],
-                            message_is_channel = message_info['message_is_channel'],
-                            message_channel_size = message_info['message_channel_size'],
-                            message_tcreate = message_info['message_tcreate']
-                            )
-
-
-        self.session.add(message)
-        self.session.commit()
-
+        pass
 
 
     def join_channel(self):
@@ -751,27 +710,7 @@ class TGInformer:
         TODO:将 channel 信息存储到 sql 中
         """ 
         
-        channel = Channel(channel_id = channel_info['channel_id'],
-                            channel_name = channel_info['channel_name'],
-                            channel_title = channel_info['channel_title'],
-                            channel_url = channel_info['channel_url'],
-                            account_id = channel_info['account_id'],
-                            channel_is_mega_group = channel_info['is_mega_group'],
-                            channel_is_group = channel_info['is_group'],
-                            channel_is_private = channel_info['is_private'],
-                            channel_is_broadcast = channel_info['is_broadcast'],
-                            channel_access_hash = channel_info['access_hash'],
-                            channel_size = channel_info['channel_size']
-                            )
-        # 查询频道是否存在
-        q = self.session.query(Channel).filter_by(channel_id=channel_info['channel_id']).all()
-        
-        if q:
-            q = channel
-        else:
-            self.session.add(channel)
-
-        self.session.commit()
+        pass
 
     def get_channel_user_count(self,dialog):
         """ 
@@ -788,3 +727,4 @@ class TGInformer:
         """ 
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
+        pass

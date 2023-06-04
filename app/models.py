@@ -90,7 +90,6 @@ class Message(Base):
     message_mentioned_user_id = Column(BigInteger,default=None)
     message_is_scheduled = Column(Boolean(), default=None)                                  # 是否预设发送
     message_is_fwd = Column(Boolean(), default=None)                                        # 是否转发消息
-    fwd_message_txt = Column(String(1000), default=None)
     fwd_message_send_id =  Column(BigInteger, default=None)
     fwd_message_date = Column(DateTime, default=None)
     message_is_reply = Column(Boolean(), default=None)                                      # 是否是回复
