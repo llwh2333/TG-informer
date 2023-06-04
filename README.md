@@ -62,11 +62,6 @@
 - [x] chat_user_tmodified
 - [x] log_time
 
-# SQL存储存在的问题：
-## informer.py中  363  行  messqge_info两项存在问题 
-1. 'mentioned_user': None,
-2. 'message_channel_size':0
-
 
 
 
