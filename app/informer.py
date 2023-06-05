@@ -58,7 +58,6 @@ class TGInformer:
 
         # 实例变量
         self.channel_meta = {}                      # 已加入 channel 的信息
-        self.channel_list = []
         self.bot_task = None
         self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
         self.MIN_CHANNEL_JOIN_WAIT = 30
