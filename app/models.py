@@ -92,10 +92,8 @@ class Message(Base):
     message_tcreate = Column(DateTime, default=datetime.now())
     message_is_mention = Column(Boolean(), default=None)  # 是否提及他人
     message_mention_user = Column(String(100), default=None)
-    message_mentioned_user_id = Column(String(300), default=None)
     message_is_scheduled = Column(Boolean(), default=None)  # 是否预设发送
     message_is_fwd = Column(Boolean(), default=None)  # 是否转发消息
-    fwd_message_txt = Column(String(1000), default=None)
     fwd_message_send_id = Column(BigInteger, default=None)
     fwd_message_send_name = Column(String(100), default=None)
     fwd_message_saved_id = Column(String(300), default=None)
