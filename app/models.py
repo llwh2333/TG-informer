@@ -58,7 +58,8 @@ class ChatUser(Base):
     """ 
     __tablename__ = 'chat_user'
     id = Column(BigInteger, primary_key=True, index=True)
-    chat_user_id = Column(BigInteger, unique=True, index=True, nullable=False)      # 参与者 id
+    chat_user_id = Column(BigInteger, index=True, nullable=False)      # 参与者 id
+    channel_id = Column(BigInteger,ForeignKey("channel.channel_id")) 
 
     chat_user_name = Column(String(100), default=None)                              # 参与者账户用户名
     chat_user_first_name = Column(String(50), default=None)                         # 参与者昵称
