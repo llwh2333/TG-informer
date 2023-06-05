@@ -318,7 +318,6 @@ class TGInformer:
         is_fwd = False if message_obj.fwd_from is None else True
         if is_fwd:
             fwd_message_date = message_obj.fwd_from.date
-            fwd_message_txt = message_obj.fwd_from.message
             fwd_message_send_name = message_obj.fwd_from.from_name
             fwd_message_times = message_obj.forwards
             fwd_message_saved_id = message_obj.fwd_from.saved_from_msg_id
@@ -374,7 +373,7 @@ class TGInformer:
             'message_tcreate':datetime.now(),
             'is_mention':is_mention,
             # 'mentioned_user':mentioned_users[0] if mentioned_users else None,
-            'mentioned_user': None,
+            'mentioned_user': mentioned_users,
             'is_scheduled':is_scheduled,
             'is_fwd':is_fwd,
             'fwd_message_txt':fwd_message_txt,
