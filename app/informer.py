@@ -274,9 +274,8 @@ class TGInformer:
 
         #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
         if event.message.media is not None:
-            file_path = './picture'
             logging.info(f'the message have media')
-            await self.download_file(event,file_path)
+            await self.download_file(event)
 
         message = event.raw_text
         if message == '':
@@ -480,25 +479,37 @@ class TGInformer:
             logging.info(f'not picture ')
             return 
         file_name = self.GetImageName(event)
+        file_path = self.GetImagePath(event)
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
         download_path = file_path+'/' + file_name+'.jpg'
         await event.download_media(download_path)
         logging.info(f'picture down OK')
 
-    def GetImageName(self,event):
+    def GetImagePath(self,event):
         """ 
-        获得图片文件名，用于存储
+        获得图片的存储路径
         """ 
-        now = datetime.now()
-        file_data = now.strftime("%y_%m_%d_")
+        file_path = './picture'
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
         elif isinstance(event.message.to_id, PeerChat):
             channel_id = event.message.to_id.chat_id
         else:
-            return
-        image_name = str(channel_id)+'_'+str(event.message.id)+'_'+str(event.message.grouped_id)
-        file_name = file_data+image_name
-        return file_name
+            channel_id = 'None'
+
+        now = datetime.now()
+        file_path = file_path+ '/'+str(channel_id)+'/'+now.strftime("%y_%m_%d")
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
+        return file_path
+
+    def GetImageName(self,event):
+        """ 
+        获得图片文件名，用于存储
+        """ 
+        image_name = str(event.message.id)+'_'+str(event.message.grouped_id)
+        return image_name
 
     def flush_status_in_sql(self,message_info):
         """ 
