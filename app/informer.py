@@ -24,6 +24,8 @@ from models import Account, Channel, ChatUser, Message
 import threading
 import json
 from telethon.tl import types
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 
 """ 
 监控 tg
@@ -53,10 +55,23 @@ class TGInformer:
         #傀儡账号配置参数
         tg_account_id = os.environ['TELEGRAM_ACCOUNT_ID'],
         tg_notifications_channel_id = os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
-        tg_phone_number = os.environ['TELEGRAM_ACCOUNT_PHONE_NUMBER']
+        tg_phone_number = os.environ['TELEGRAM_ACCOUNT_PHONE_NUMBER'],
+
+        #es
+        es_ip=os.environ['ES_IP'],
+        es_port=os.environ['ES_PORT'],
+        es_message_index=os.environ['ES_MESSAGE_INDEX'],
+        es_channel_index=os.environ['ES_CHANNEL_INDEX'],
+        es_user_index=os.environ['ES_USER_INDEX'],
         ): 
 
         # 实例变量
+        self.ES_IP =es_ip
+        self.ES_PORT = es_port
+        self.ES_MESSAGE_INDEX = es_message_index
+        self.ES_CHANNEL_INDEX = es_channel_index
+        self.ES_USER_INDEX = es_user_index
+
         self.channel_meta = {}                      # 已加入 channel 的信息
         self.bot_task = None
         self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
@@ -281,6 +296,8 @@ class TGInformer:
         #self.flush_status_in_sql(e)
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
+        if self.ES_MESSAGE_INDEX != '':
+            self.updata_message_to_es(e)
 
     async def get_message_info_from_event(self,event,channel_id):
         """ 
@@ -694,3 +711,94 @@ class TGInformer:
         """ 
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
+
+    def updata_message_to_es(self,message_info):
+        """ 
+        TODO:将获得到的 message 信息存入 es 系统中
+        """ 
+        # 建立连接
+        address = f"http://{self.ES_IP}:{self.ES_PORT}"
+        es = Elasticsearch([address])
+
+        # 检查 index
+        es_index = self.ES_MESSAGE_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index new_message_info')
+        else:
+            logging.info(' message_info index exit')
+
+        # 获取数据
+        es_message = {
+            'message_id':message_info['message_id'],
+            'channel_id':message_info['channel_id'],
+            'sender_id':message_info['chat_user_id'],
+            'message_txt':message_info['message_text'],
+            'is_scheduled':message_info['message_is_scheduled'],
+            'is_bot':message_info['message_is_bot'],
+            'is_group':message_info['message_is_group'],
+            'is_private':message_info['message_is_private'],
+            'is_channel':message_info['message_is_channel'],
+            'message_data':message_info['message_tcreate'],
+        }
+        
+        if (message_info['is_mention']):
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+                'mentioned_user_name':message_info['mentioned_user']
+            }
+        else:
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+            }
+        es_message.update(mention_data)
+
+        if (message_info['is_fwd']):
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+                'fwd_message_send_id':message_info['fwd_message_send_id'],
+                'fwd_message_send_name':message_info['fwd_message_send_name'],
+                'fwd_message_times':message_info['fwd_message_times'],
+                'fwd_message_saved_id':message_info['fwd_message_saved_id'],
+                'fwd_message_date':message_info['fwd_message_date']
+            }
+        else:
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+            }
+        es_message.update(fwd_data)
+
+        if (message_info['is_reply']):
+            reply_data = {
+                'is_reply':message_info['is_reply'],
+                'reply_message_txt':message_info['reply_message_txt'],
+                'reply_message_send_id':message_info['reply_message_send_id'],
+                'reply_message_id':message_info['reply_message_id'],
+                'reply_message_times':message_info['reply_message_times'],
+                'reply_message_date':message_info['reply_message_date']
+            }
+        else:
+            reply_data = {
+                'is_reply':message_info['is_reply']
+            }
+        es_message.update(reply_data)
+
+        es_id = str(message_info['channel_id'])+'_'+str(message_info['message_id'])
+
+        # 将数据进行上传
+        n = es.index(index=es_index,doc_type='_doc',body=es_message,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+
+    def updata_channel_to_es(self,channel_info):
+        """ 
+        TODO:将获得到的 channel 信息存入 es 中
+        """ 
+        pass
+
+    def updata_user_to_es(self,user_info):
+        """ 
+        TODO:将获得到的 channel 的 user 信息存入 es 中
+        """ 
+        pass
+
