@@ -14,4 +14,4 @@ source testvenv1/bin/activate
 pip install -r requirements.txt
 
 #run the bot
-python3 bot.py <account_id>
+python3 bot.py 
