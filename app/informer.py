@@ -668,8 +668,34 @@ class TGInformer:
         """
         TODO:将获得的消息信息存储进入 sql 中(暂时不弄)
         """
-
-        pass
+        self.message_dict = Message(
+            message_id=message_info['message_id'],
+            chat_user_id=message_info['chat_user_id'],
+            account_id=message_info['account_id'],
+            channel_id=message_info['channel_id'],
+            message_text=message_info['message_text'],
+            message_is_bot=message_info['message_is_bot'],
+            message_is_group=message_info['message_is_group'],
+            message_is_private=message_info['message_is_private'],
+            message_is_channel=message_info['message_is_channel'],
+            message_tcreate=message_info['message_tcreate'],
+            message_is_mention=message_info['is_mention'],
+            message_mention_user=str(message_info['mentioned_user']),
+            message_is_scheduled=message_info['message_is_scheduled'],
+            message_is_fwd=message_info['is_fwd'],
+            fwd_message_send_id=message_info['fwd_message_send_id'],
+            fwd_message_send_name=message_info['fwd_message_send_name'],
+            fwd_message_saved_id=message_info['fwd_message_saved_id'],
+            fwd_message_times=message_info['fwd_message_times'],
+            fwd_message_date=message_info['fwd_message_date'],
+            message_is_reply=message_info['is_reply'],
+            reply_message_txt=message_info['reply_message_txt'],
+            reply_message_id=message_info['reply_message_id'],
+            reply_message_send_id=message_info['reply_message_send_id'],
+            reply_message_date=message_info['reply_message_date'],
+            reply_message_times=message_info['reply_message_times'])
+        self.session.merge(self.message_dict)
+        self.session.commit()
 
 
     def join_channel(self):
@@ -708,9 +734,22 @@ class TGInformer:
     def store_channel_info_in_sql(self,channel_info):
         """ 
         TODO:将 channel 信息存储到 sql 中
-        """ 
-        
-        pass
+        """
+        self.channel_dict = Channel(
+            channel_id=channel_info['channel_id'],
+            channel_name=channel_info['channel_name'],
+            channel_title=channel_info['channel_title'],
+            channel_url=channel_info['channel_url'],
+            account_id=channel_info['account_id'],
+            channel_is_mega_group=channel_info['is_mega_group'],
+            channel_is_group=channel_info['is_group'],
+            channel_is_private=channel_info['is_private'],
+            channel_is_broadcast=channel_info['is_broadcast'],
+            channel_access_hash=channel_info['access_hash'],
+            channel_size=channel_info['channel_size'])
+
+        self.session.merge(self.channel_dict)
+        self.session.commit()
 
     def get_channel_user_count(self,dialog):
         """ 
