@@ -20,7 +20,7 @@ load_dotenv(dotenv_path=dotenv_path)
 
 # 检查输入的变量是否足够
 try:
-    account_id = sys.argv[1]
+    account_id = os.environ['TELEGRAM_ACCOUNT_ID']
 except:
     raise Exception('informer.py <account_id> - account_id is a required param')
 
