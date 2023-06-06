@@ -13,7 +13,7 @@ from random import randrange
 from telethon import utils
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError, InterfaceError, ProgrammingError
-from telethon.tl.functions.users import GetFullUserRequest,GetFullChannelRequest
+from telethon.tl.functions.users import GetFullUserRequest
 from telethon import TelegramClient, events
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
@@ -469,7 +469,7 @@ class TGInformer:
 
         self.store_data_in_json_file(json_file_name, self.lock_message, 'messages', new_message)
 
-    async def download_file(self,event,file_path):
+    async def download_file(self,event):
         """ 
         将图片存储到指定路径
         """ 
@@ -608,13 +608,9 @@ class TGInformer:
         if not dialog.is_group :
             return None
 
-        # users = await self.client.get_participants(dialog)
-
         count = 0
 
         async for user in self.client.iter_participants(dialog, aggressive=True):
-            # print("{} : {}".format(user.id,user.username))
-        # for user in users:
             user_id = user.id
             user_name = user.username
             first_name = user.first_name

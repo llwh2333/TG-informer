@@ -59,7 +59,7 @@ class ChatUser(Base):
     __tablename__ = 'chat_user'
     id = Column(BigInteger, primary_key=True, index=True)
     chat_user_id = Column(BigInteger, index=True, nullable=False)      # 参与者 id
-    channel_id = Column(BigInteger,ForeignKey("channel.channel_id")) 
+    channel_id = Column(BigInteger,default=None) 
 
     chat_user_name = Column(String(100), default=None)                              # 参与者账户用户名
     chat_user_first_name = Column(String(50), default=None)                         # 参与者昵称
@@ -67,7 +67,6 @@ class ChatUser(Base):
 
     chat_user_is_bot = Column(Boolean(), default=None)                              # 参与者是否为 bot
     chat_user_is_verified = Column(Boolean(), default=None)                         # 参与者是否验证
-
     chat_user_is_restricted = Column(Boolean(), default=None)                       # 是否受限用户
 
     chat_user_phone = Column(String(25), default=None)                              # 参与者手机号
