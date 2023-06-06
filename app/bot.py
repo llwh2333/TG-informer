@@ -20,7 +20,6 @@ load_dotenv(dotenv_path=dotenv_path)
 
 # 检查输入的变量是否足够
 try:
-    # account_id = sys.argv[1]
     account_id = os.environ['TELEGRAM_ACCOUNT_ID']
 except:
     raise Exception('informer.py <account_id> - account_id is a required param')
@@ -38,6 +37,11 @@ if __name__ == '__main__':
         db_port = os.environ['MYSQL_PORT'],
         tg_account_id = os.environ['TELEGRAM_ACCOUNT_ID'],
         tg_notifications_channel_id = os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
+        es_ip=os.environ['ES_IP'],
+        es_port=os.environ['ES_PORT'],
+        es_message_index=os.environ['ES_MESSAGE_INDEX'],
+        es_channel_index=os.environ['ES_CHANNEL_INDEX'],
+        es_user_index=os.environ['ES_USER_INDEX'],
     )
     informer.init()
 
