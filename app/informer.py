@@ -746,7 +746,14 @@ class TGInformer:
             q = self.session.query(ChatUser).filter_by(chat_user_id=user_info['user_id'],channel_id=user_info['channel_id']).all()
         
             if q:
-                q = user
+                q.chat_user_name = user.chat_user_name
+                q.chat_user_first_name = user.chat_user_first_name
+                q.chat_user_last_name = user.chat_user_last_name
+                q.chat_user_is_bot = user.chat_is_bot
+                q.chat_user_is_verified = user.chat_user_is_verified
+                q.chat_user_is_restricted = user.chat_user_is_restricted
+                q.chat_user_phone = user.chat_user_phone
+                q.chat_user_tlogin = user.chat_user_tlogin
             else:
                 self.session.add(user)
         self.session.commit()
