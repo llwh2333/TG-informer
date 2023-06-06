@@ -1,0 +1,8 @@
+app/__pycache__
+app/channel_info
+app/message
+app/picture
+app/testvenv1
+app/user_info
+*.session
+*.env

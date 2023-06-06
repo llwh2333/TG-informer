@@ -875,5 +875,36 @@ class TGInformer:
         """ 
         TODO:将获得到的 channel 的 user 信息存入 es 中
         """ 
-        pass
+        # 建立连接
+        address = f"http://{self.ES_IP}:{self.ES_PORT}"
+        es = Elasticsearch([address])
+
+        # 检查 index
+        es_index = self.ES_MESSAGE_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index new_user_info')
+        else:
+            logging.info(' user_info index exit')
+
+        # 获取数据
+        es_user = {
+            'chat_user_id' : user_info['user_id'],
+            'channel_id' : user_info['channel_id'],
+            'chat_user_name' : user_info['user_name'],
+            'chat_user_first_name' : user_info['first_name'][:50] if user_info['first_name'] else None,
+            'chat_user_last_name' : user_info['last_name'][:50] if user_info['last_name'] else None,
+            'chat_user_is_bot' : user_info['is_bot'],
+            'chat_user_is_verified' : user_info['is_verified'],
+            'chat_user_is_restricted' : user_info['is_restricted'],
+            'chat_user_phone' : user_info['user_phone'],
+            'chat_user_tlogin' : user_info['tlogin']
+        }
+
+        es_id = str(user_info['channel_id'])+'_'+str(user_info['user_id'])
+
+        # 将数据进行上传
+        n = es.index(index=es_index,doc_type='_doc',body=es_user,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
 
