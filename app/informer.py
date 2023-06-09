@@ -25,7 +25,6 @@ import threading
 import json
 from telethon.tl import types
 from elasticsearch import Elasticsearch
-from elasticsearch.helpers import bulk
 
 """ 
 监控 tg
