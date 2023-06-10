@@ -24,6 +24,8 @@ from models import Account, Channel, ChatUser, Message
 import threading
 import json
 from telethon.tl import types
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 
 """ 
 监控 tg
@@ -53,10 +55,23 @@ class TGInformer:
         #傀儡账号配置参数
         tg_account_id = os.environ['TELEGRAM_ACCOUNT_ID'],
         tg_notifications_channel_id = os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
-        tg_phone_number = os.environ['TELEGRAM_ACCOUNT_PHONE_NUMBER']
+        tg_phone_number = os.environ['TELEGRAM_ACCOUNT_PHONE_NUMBER'],
+
+        #es
+        es_ip=os.environ['ES_IP'],
+        es_port=os.environ['ES_PORT'],
+        es_message_index=os.environ['ES_MESSAGE_INDEX'],
+        es_channel_index=os.environ['ES_CHANNEL_INDEX'],
+        es_user_index=os.environ['ES_USER_INDEX'],
         ): 
 
         # 实例变量
+        self.ES_IP =es_ip
+        self.ES_PORT = es_port
+        self.ES_MESSAGE_INDEX = es_message_index
+        self.ES_CHANNEL_INDEX = es_channel_index
+        self.ES_USER_INDEX = es_user_index
+
         self.channel_meta = {}                      # 已加入 channel 的信息
         self.bot_task = None
         self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
@@ -208,7 +223,7 @@ class TGInformer:
         #join_channel()
 
         async for dialog in self.client.iter_dialogs():
-            if dialog.is_channel or dialog.is_group:
+            if not dialog.is_user:
                 e = await self.get_channel_info_by_dialog(dialog)
                 self.channel_meta[e['channel_id']] = {
                    'channel_id': e['channel_id'],
@@ -216,6 +231,7 @@ class TGInformer:
                    'channel_url': e['channel_url'],
                    'channel_size': e['channel_size'],
                 }
+        
                 self.dump_channel_info(e)
                 await self.dump_channel_user_info(dialog)
 
@@ -238,11 +254,8 @@ class TGInformer:
                     init_json ={}
                     json_first = json.dumps(init_json)
                     f.write(json_first)
-                with open(file_name, 'r') as f:
-                    file_data = json.load(f)
-            else:
-                with open(file_name,'r') as f:
-                    file_data = json.load(f)
+            with open(file_name, 'r') as f:
+                file_data = json.load(f)
             try:
                 file_data[data_key].append(data)
             except KeyError:
@@ -259,9 +272,8 @@ class TGInformer:
 
         #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
         if event.message.media is not None:
-            file_path = './picture'
             logging.info(f'the message have media')
-            await self.download_file(event,file_path)
+            await self.download_file(event)
 
         message = event.raw_text
         if message == '':
@@ -281,6 +293,8 @@ class TGInformer:
         #self.flush_status_in_sql(e)
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
+        if self.ES_MESSAGE_INDEX != '':
+            self.updata_message_to_es(e)
 
     async def get_message_info_from_event(self,event,channel_id):
         """ 
@@ -332,6 +346,7 @@ class TGInformer:
                     fwd_message_send_id = message_obj.fwd_from.from_id.channel_id
         else:
             fwd_message_date = None
+            fwd_message_txt = None
             fwd_message_send_name = None
             fwd_message_send_id = None
             fwd_message_saved_id = None
@@ -372,7 +387,7 @@ class TGInformer:
             'message_is_channel':is_channel ,
             'message_tcreate':datetime.now(),
             'is_mention':is_mention,
-            'mentioned_user':mentioned_users,
+            'mentioned_user': mentioned_users,
             'is_scheduled':is_scheduled,
             'is_fwd':is_fwd,
             'fwd_message_date':fwd_message_date,
@@ -386,6 +401,7 @@ class TGInformer:
             'reply_message_id':reply_message_id,
             'reply_message_date':reply_message_date,
             'reply_message_times':reply_message_times,
+            'message_channel_size':0
             }
         return message_info
 
@@ -453,7 +469,7 @@ class TGInformer:
 
         self.store_data_in_json_file(json_file_name, self.lock_message, 'messages', new_message)
 
-    async def download_file(self,event,file_path):
+    async def download_file(self,event):
         """ 
         将图片存储到指定路径
         """ 
@@ -463,25 +479,37 @@ class TGInformer:
             logging.info(f'not picture ')
             return 
         file_name = self.GetImageName(event)
+        file_path = self.GetImagePath(event)
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
         download_path = file_path+'/' + file_name+'.jpg'
         await event.download_media(download_path)
         logging.info(f'picture down OK')
 
-    def GetImageName(self,event):
+    def GetImagePath(self,event):
         """ 
-        获得图片文件名，用于存储
+        获得图片的存储路径
         """ 
-        now = datetime.now()
-        file_data = now.strftime("%y_%m_%d_")
+        file_path = './picture'
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
         elif isinstance(event.message.to_id, PeerChat):
             channel_id = event.message.to_id.chat_id
         else:
-            return
-        image_name = str(channel_id)+'_'+str(event.message.id)+'_'+str(event.message.grouped_id)
-        file_name = file_data+image_name
-        return file_name
+            channel_id = 'None'
+
+        now = datetime.now()
+        file_path = file_path+ '/'+str(channel_id)+'/'+now.strftime("%y_%m_%d")
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
+        return file_path
+
+    def GetImageName(self,event):
+        """ 
+        获得图片文件名，用于存储
+        """ 
+        image_name = str(event.message.id)+'_'+str(event.message.grouped_id)
+        return image_name
 
     def flush_status_in_sql(self,message_info):
         """ 
@@ -563,6 +591,7 @@ class TGInformer:
         """ 
         将会话的所有成员的信息存储下来
         """ 
+        
         e = await self.get_user_info_from_dialog(dialog)
         if e == None:
             return 
@@ -575,11 +604,13 @@ class TGInformer:
         """ 
         
         users_info_list = []
-        if dialog.is_channel :
+
+        if not dialog.is_group :
             return None
-        users = await self.client.get_participants(dialog.id)
+
         count = 0
-        for user in users:
+
+        async for user in self.client.iter_participants(dialog, aggressive=True):
             user_id = user.id
             user_name = user.username
             first_name = user.first_name
@@ -596,6 +627,7 @@ class TGInformer:
 
             user_info={
                 'user_id':user_id,
+                'channel_id':dialog.id,
                 'user_name' : user_name,
                 'first_name' : first_name,
                 'last_name': last_name,
@@ -611,6 +643,7 @@ class TGInformer:
             users_info_list.append(user_info)
             count += 1
         logging.info(f'Logging the users account {count} ... \n')
+
         return users_info_list
 
     def store_user_info_in_json_file(self,user_info_list,dialog):
@@ -639,10 +672,6 @@ class TGInformer:
         self.store_data_in_json_file(json_file_name, self.lock_chat_user, str(dialog.id),users_info)
 
 
-
-
-
-
     def check_channels_user_info_in_sql(self):
         """ 
         TODO: 将 sql 中的 channel 参与者信息与 account 中的保持一致 
@@ -659,7 +688,35 @@ class TGInformer:
         """
         TODO:将获得的消息信息存储进入 sql 中(暂时不弄)
         """
-        pass
+        self.message_dict = Message(
+            message_id=message_info['message_id'],
+            chat_user_id=message_info['chat_user_id'],
+            account_id=message_info['account_id'],
+            channel_id=message_info['channel_id'],
+            message_text=message_info['message_text'],
+            message_is_bot=message_info['message_is_bot'],
+            message_is_group=message_info['message_is_group'],
+            message_is_private=message_info['message_is_private'],
+            message_is_channel=message_info['message_is_channel'],
+            message_tcreate=message_info['message_tcreate'],
+            message_is_mention=message_info['is_mention'],
+            message_mention_user=str(message_info['mentioned_user']),
+            message_is_scheduled=message_info['message_is_scheduled'],
+            message_is_fwd=message_info['is_fwd'],
+            fwd_message_send_id=message_info['fwd_message_send_id'],
+            fwd_message_send_name=message_info['fwd_message_send_name'],
+            fwd_message_saved_id=message_info['fwd_message_saved_id'],
+            fwd_message_times=message_info['fwd_message_times'],
+            fwd_message_date=message_info['fwd_message_date'],
+            message_is_reply=message_info['is_reply'],
+            reply_message_txt=message_info['reply_message_txt'],
+            reply_message_id=message_info['reply_message_id'],
+            reply_message_send_id=message_info['reply_message_send_id'],
+            reply_message_date=message_info['reply_message_date'],
+            reply_message_times=message_info['reply_message_times'])
+        self.session.merge(self.message_dict)
+        self.session.commit()
+
 
     def join_channel(self):
         """ 
@@ -671,13 +728,48 @@ class TGInformer:
         """ 
         TODO:将获得的 user 列表信息存储到 sql 库中(暂时不弄)
         """ 
-        pass
+
+        for user_info in user_info_list:
+            user = ChatUser(chat_user_id = user_info['user_id'],
+                            channel_id = user_info['channel_id'],
+                            chat_user_name = user_info['user_name'],
+                            chat_user_first_name = user_info['first_name'][:50] if user_info['first_name'] else None,
+                            chat_user_last_name = user_info['last_name'][:50] if user_info['last_name'] else None,
+                            chat_user_is_bot = user_info['is_bot'],
+                            chat_user_is_verified = user_info['is_verified'],
+                            chat_user_is_restricted = user_info['is_restricted'],
+                            chat_user_phone = user_info['user_phone'],
+                            chat_user_tlogin = user_info['tlogin']
+                            )
+
+            # 查询频道是否存在
+            q = self.session.query(ChatUser).filter_by(chat_user_id=user_info['user_id'],channel_id=user_info['channel_id']).all()
+        
+            if q:
+                q = user
+            else:
+                self.session.add(user)
+        self.session.commit()
 
     def store_channel_info_in_sql(self,channel_info):
         """ 
         TODO:将 channel 信息存储到 sql 中
-        """ 
-        pass
+        """
+        self.channel_dict = Channel(
+            channel_id=channel_info['channel_id'],
+            channel_name=channel_info['channel_name'],
+            channel_title=channel_info['channel_title'],
+            channel_url=channel_info['channel_url'],
+            account_id=channel_info['account_id'],
+            channel_is_mega_group=channel_info['is_mega_group'],
+            channel_is_group=channel_info['is_group'],
+            channel_is_private=channel_info['is_private'],
+            channel_is_broadcast=channel_info['is_broadcast'],
+            channel_access_hash=channel_info['access_hash'],
+            channel_size=channel_info['channel_size'])
+
+        self.session.merge(self.channel_dict)
+        self.session.commit()
 
     def get_channel_user_count(self,dialog):
         """ 
@@ -694,3 +786,94 @@ class TGInformer:
         """ 
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
+
+    def updata_message_to_es(self,message_info):
+        """ 
+        TODO:将获得到的 message 信息存入 es 系统中
+        """ 
+        # 建立连接
+        address = f"http://{self.ES_IP}:{self.ES_PORT}"
+        es = Elasticsearch([address])
+
+        # 检查 index
+        es_index = self.ES_MESSAGE_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index new_message_info')
+        else:
+            logging.info(' message_info index exit')
+
+        # 获取数据
+        es_message = {
+            'message_id':message_info['message_id'],
+            'channel_id':message_info['channel_id'],
+            'sender_id':message_info['chat_user_id'],
+            'message_txt':message_info['message_text'],
+            'is_scheduled':message_info['message_is_scheduled'],
+            'is_bot':message_info['message_is_bot'],
+            'is_group':message_info['message_is_group'],
+            'is_private':message_info['message_is_private'],
+            'is_channel':message_info['message_is_channel'],
+            'message_data':message_info['message_tcreate'],
+        }
+        
+        if (message_info['is_mention']):
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+                'mentioned_user_name':message_info['mentioned_user']
+            }
+        else:
+            mention_data = {
+                'is_mention':message_info['is_mention'],
+            }
+        es_message.update(mention_data)
+
+        if (message_info['is_fwd']):
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+                'fwd_message_send_id':message_info['fwd_message_send_id'],
+                'fwd_message_send_name':message_info['fwd_message_send_name'],
+                'fwd_message_times':message_info['fwd_message_times'],
+                'fwd_message_saved_id':message_info['fwd_message_saved_id'],
+                'fwd_message_date':message_info['fwd_message_date']
+            }
+        else:
+            fwd_data = {
+                'is_fwd':message_info['is_fwd'],
+            }
+        es_message.update(fwd_data)
+
+        if (message_info['is_reply']):
+            reply_data = {
+                'is_reply':message_info['is_reply'],
+                'reply_message_txt':message_info['reply_message_txt'],
+                'reply_message_send_id':message_info['reply_message_send_id'],
+                'reply_message_id':message_info['reply_message_id'],
+                'reply_message_times':message_info['reply_message_times'],
+                'reply_message_date':message_info['reply_message_date']
+            }
+        else:
+            reply_data = {
+                'is_reply':message_info['is_reply']
+            }
+        es_message.update(reply_data)
+
+        es_id = str(message_info['channel_id'])+'_'+str(message_info['message_id'])
+
+        # 将数据进行上传
+        n = es.index(index=es_index,doc_type='_doc',body=es_message,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+
+    def updata_channel_to_es(self,channel_info):
+        """ 
+        TODO:将获得到的 channel 信息存入 es 中
+        """ 
+        pass
+
+    def updata_user_to_es(self,user_info):
+        """ 
+        TODO:将获得到的 channel 的 user 信息存入 es 中
+        """ 
+        pass
+
