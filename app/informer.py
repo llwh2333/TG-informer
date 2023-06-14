@@ -25,6 +25,7 @@ import threading
 import json
 from telethon.tl import types
 from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 
 """ 
 监控 tg
@@ -70,6 +71,7 @@ class TGInformer:
         self.ES_MESSAGE_INDEX = es_message_index
         self.ES_CHANNEL_INDEX = es_channel_index
         self.ES_USER_INDEX = es_user_index
+        self.es_message = []
 
         self.channel_meta = {}                      # 已加入 channel 的信息
         self.bot_task = None
@@ -78,9 +80,19 @@ class TGInformer:
         self.MAX_CHANNEL_JOIN_WAIT = 120
         self.client = None
         self.loop = asyncio.get_event_loop()
+
+        # 异步锁
         self.lock_message = threading.Lock()
         self.lock_channel = threading.Lock()
         self.lock_chat_user = threading.Lock()
+        self.lock_es_message = threading.Lock()
+
+
+        # 建立 es 的连接，如有设置了相关配置
+        self.es_connect = None
+        if (self.ES_IP != '' and self.ES_PORT != ''):
+            address = f"http://{self.ES_IP}:{self.ES_PORT}"
+            self.es_connect = Elasticsearch([address])
 
         # 展示横幅
         print(banner)
@@ -239,6 +251,12 @@ class TGInformer:
             await self.updata_channel_user_info(event)
 
         logging.info(f'Channel METADATA: {json.dumps(self.channel_meta,ensure_ascii=False,indent=4)}')
+        
+        # 每隔 1 min 上传一次 message
+        while True:
+            if self.es_connect != None:
+                await self.updata_message_to_es()
+            await asyncio.sleep(60)
 
     def stop_bot_interval(self):
         self.bot_task.cancel()
@@ -269,14 +287,8 @@ class TGInformer:
         将收到的消息进行存储，存储到数据库和 json 文件中
         """ 
 
-        #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
-        if event.message.media is not None:
-            logging.info(f'the message have media')
-            await self.download_file(event)
-
         message = event.raw_text
-        if message == '':
-            return 
+
         if isinstance(event.message.to_id, PeerChannel):
             channel_id = event.message.to_id.channel_id
             logging.info(f'############### Get the channel message is ({message})!!!!!!!!!!!!!!!')
@@ -287,13 +299,22 @@ class TGInformer:
         else:
             # 两者均不是，跳过
             return
-    
+        
+        #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
+        if event.message.media is not None:
+            logging.info(f'the message have media')
+            await self.download_file(event)
+            if message == '':
+                message = 'picture:'+str(channel_id)+'_'+self.GetImageName(event)
+
         e = await self.get_message_info_from_event(event,channel_id)
-        #self.flush_status_in_sql(e)
+        # self.flush_status_in_sql(e)
+
+        # 将 message 存储
         self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
-        if self.ES_MESSAGE_INDEX != '':
-            self.updata_message_to_es(e)
+        if self.ES_MESSAGE_INDEX != '' and self.es_connect != None:
+            self.updata_es_message(e)
 
     async def get_message_info_from_event(self,event,channel_id):
         """ 
@@ -561,6 +582,9 @@ class TGInformer:
         """ 
         self.store_channel_info_in_json_file(channel_info)
         self.store_channel_info_in_sql(channel_info)
+        if self.ES_CHANNEL_INDEX != '' and self.es_connect != None:
+            self.updata_channel_to_es(channel_info)
+
 
     def store_channel_info_in_json_file(self,channel_info):
         """ 
@@ -592,10 +616,12 @@ class TGInformer:
         """ 
         
         e = await self.get_user_info_from_dialog(dialog)
-        if e == None:
+        if e == []:
             return 
         self.store_user_info_in_json_file(e,dialog)
         self.store_user_info_in_sql(e,dialog)
+        if self.ES_USER_INDEX != '' and self.es_connect != None:
+            self.updata_user_to_es(e)
 
     async def get_user_info_from_dialog(self,dialog):
         """ 
@@ -605,7 +631,7 @@ class TGInformer:
         users_info_list = []
 
         if not dialog.is_group :
-            return None
+            return []
 
         count = 0
 
@@ -725,7 +751,7 @@ class TGInformer:
 
     def store_user_info_in_sql(self,user_info_list,dialog):
         """ 
-        TODO:将获得的 user 列表信息存储到 sql 库中(暂时不弄)
+        将获得的 user 列表信息存储到 sql 库中(暂时不弄)
         """ 
 
         for user_info in user_info_list:
@@ -752,7 +778,7 @@ class TGInformer:
 
     def store_channel_info_in_sql(self,channel_info):
         """ 
-        TODO:将 channel 信息存储到 sql 中
+        将 channel 信息存储到 sql 中
         """
         self.channel_dict = Channel(
             channel_id=channel_info['channel_id'],
@@ -786,23 +812,10 @@ class TGInformer:
         TODO: 根据 channel 的成员变动事件，更新 channel 成员
         """ 
 
-    def updata_message_to_es(self,message_info):
+    def updata_es_message(self,message_info):
         """ 
-        TODO:将获得到的 message 信息存入 es 系统中
+        将获得的 message 信息存入字典中，等待后续批量上传
         """ 
-        # 建立连接
-        address = f"http://{self.ES_IP}:{self.ES_PORT}"
-        es = Elasticsearch([address])
-
-        # 检查 index
-        es_index = self.ES_MESSAGE_INDEX
-        if not es.indices.exists(index=es_index):
-            logging.info('begin creat')
-            result = es.indices.create(index=es_index)
-            logging.info ('creat index new_message_info')
-        else:
-            logging.info(' message_info index exit')
-
         # 获取数据
         es_message = {
             'message_id':message_info['message_id'],
@@ -858,21 +871,102 @@ class TGInformer:
             }
         es_message.update(reply_data)
 
-        es_id = str(message_info['channel_id'])+'_'+str(message_info['message_id'])
+        with self.lock_es_message:
+            self.es_message.append(es_message)
 
-        # 将数据进行上传
-        n = es.index(index=es_index,doc_type='_doc',body=es_message,id = es_id)
-        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+    async def updata_message_to_es(self):
+        """ 
+        将获得到的 message 信息批量存入 es 系统中
+        """ 
+        # 获取消息
+        es = self.es_connect
+        with self.lock_es_message:
+            message_info = self.es_message
+            self.es_message = []
+
+        # 检查 index
+        es_index = self.ES_MESSAGE_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index new_message_info')
+        else:
+            logging.info(' message_info index exit')
+
+        # 批量上传
+        actions = (
+            {
+                '_index': es_index,
+                '_type': '_doc',
+                '_id': str(Message.pop('channel_id'))+str(Message.pop('message_id')),
+                '_source': Message
+            }
+            for Message in message_info
+        )
+        n,_ = bulk(es, actions)
+        logging.info(f'es data: total:{len(message_info)} message, insert {n} message successful')
 
     def updata_channel_to_es(self,channel_info):
         """ 
-        TODO:将获得到的 channel 信息存入 es 中
+        将获得到的 channel 信息存入 es 中
         """ 
-        pass
+        es = self.es_connect
 
-    def updata_user_to_es(self,user_info):
+        # 检查 index
+        es_index = self.ES_CHANNEL_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+        else:
+            logging.info(' channel index exit')
+
+        # 将要上传的数据
+        es_channel = {
+            'channel_id':channel_info['channel_id'],
+            'channel_name':channel_info['channel_name'],
+            'channel_title':channel_info['channel_title'],
+            'account_id':channel_info['account_id'],
+            'is_mega_group':channel_info['is_mega_group'] ,
+            'is_group':channel_info['is_group'],
+            'channel_url':channel_info['channel_url'],
+            'is_private':channel_info['is_private'],
+            'is_broadcast':channel_info['is_broadcast'],
+            'access_hash':channel_info['access_hash'],
+            'channel_size':channel_info['channel_size'],
+        }
+        es_id = str(channel_info['channel_id'])
+
+        # 将数据进行上传
+        n = es.index(index=es_index,doc_type='_doc',body=es_channel,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+
+    def updata_user_to_es(self,users_info):
         """ 
-        TODO:将获得到的 channel 的 user 信息存入 es 中
+        将获得到的 channel 的 user 信息存入 es 中
         """ 
-        pass
+        es = self.es_connect
+
+        # 检查 index
+        es_index = self.ES_USER_INDEX
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index user')
+        else:
+            logging.info(' user index exit')
+
+        actions = (
+            {
+                '_index': es_index,
+                '_type': '_doc',
+                '_id':str(User_info['user_id']),
+                '_source':User_info,
+            }
+            for User_info in users_info
+        )
+
+        # 将数据进行上传
+        n,_ = bulk(es, actions)
+        logging.info(f'es data: total:{len(users_info)} user, insert {n} user successful')
 
