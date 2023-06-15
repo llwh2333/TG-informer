@@ -610,22 +610,23 @@ class TGInformer:
 
         count = 0
 
-        async for user in self.client.iter_participants(dialog, aggressive=True):
-            user_id = user.id
-            user_name = user.username
-            first_name = user.first_name
-            last_name = user.last_name
-            is_bot = user.bot
-            user_phone = user.phone
-            is_verified = user.verified
-            is_restricted = user.restricted
-            access_hash = user.access_hash
-            tlogin = None
-            if  isinstance(user.participant,ChannelParticipant):
-                tlogin = user.participant.date
-            modified = None
+        try:
+            async for user in self.client.iter_participants(dialog, aggressive=True):
+                user_id = user.id
+                user_name = user.username
+                first_name = user.first_name
+                last_name = user.last_name
+                is_bot = user.bot
+                user_phone = user.phone
+                is_verified = user.verified
+                is_restricted = user.restricted
+                access_hash = user.access_hash
+                tlogin = None
+                if  isinstance(user.participant,ChannelParticipant):
+                    tlogin = user.participant.date
+                modified = None
 
-            user_info={
+                user_info={
                 'user_id':user_id,
                 'channel_id':dialog.id,
                 'user_name' : user_name,
@@ -638,13 +639,25 @@ class TGInformer:
                 'tlogin':tlogin,
                 'modified':modified,
                 'access_hash':access_hash,
-            }
+                }
 
-            users_info_list.append(user_info)
-            count += 1
+                users_info_list.append(user_info)
+                count += 1
+
+        except FloodWaitError as e:
+            print(f"Got FloodWaitError. Need to wait {e.seconds} seconds before next request.")
+            await asyncio.sleep(e.seconds+20)
+        except ValueError:
+            print('valuerror')
+            await asyncio.create_task(self.pause(90))
+            
+
         logging.info(f'Logging the users account {count} ... \n')
 
         return users_info_list
+
+    async def pause(self,seconds):
+        await asyncio.sleep(seconds)
 
     def store_user_info_in_json_file(self,user_info_list,dialog):
         """ 
@@ -693,7 +706,7 @@ class TGInformer:
             chat_user_id=message_info['chat_user_id'],
             account_id=message_info['account_id'],
             channel_id=message_info['channel_id'],
-            message_text=message_info['message_text'],
+            message_text=message_info['message_text'][:1000] if message_info['message_text'] else None,
             message_is_bot=message_info['message_is_bot'],
             message_is_group=message_info['message_is_group'],
             message_is_private=message_info['message_is_private'],
@@ -743,17 +756,17 @@ class TGInformer:
                             )
 
             # 查询频道是否存在
-            q = self.session.query(ChatUser).filter_by(chat_user_id=user_info['user_id'],channel_id=user_info['channel_id']).all()
+            q = self.session.query(ChatUser).filter_by(chat_user_id=user_info['user_id'],channel_id=user_info['channel_id']).first()
         
             if q:
-                q.chat_user_name = user.chat_user_name
-                q.chat_user_first_name = user.chat_user_first_name
-                q.chat_user_last_name = user.chat_user_last_name
-                q.chat_user_is_bot = user.chat_is_bot
-                q.chat_user_is_verified = user.chat_user_is_verified
-                q.chat_user_is_restricted = user.chat_user_is_restricted
-                q.chat_user_phone = user.chat_user_phone
-                q.chat_user_tlogin = user.chat_user_tlogin
+                q.chat_user_name = user_info['user_name'] if user_info['user_name'] else None
+                q.chat_user_first_name = user_info['first_name'][:50] if user_info['first_name'] else None
+                q.chat_user_last_name = user_info['last_name'][:50] if user_info['last_name'] else None
+                q.chat_user_is_bot = user_info['is_bot'] 
+                q.chat_user_is_verified = user_info['is_verified']
+                q.chat_user_is_restricted = user_info['is_restricted']
+                q.chat_user_phone = user_info['user_phone']
+                q.chat_user_tlogin = user_info['tlogin']
             else:
                 self.session.add(user)
         self.session.commit()
