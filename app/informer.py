@@ -52,6 +52,8 @@ class TGInformer:
         db_ip_address = os.environ['MYSQL_IP_ADDRESS'],
         db_port = os.environ['MYSQL_PORT'],
 
+        models = os.environ['INFO_DUMP_LOCAL'],
+
         #傀儡账号配置参数
         tg_account_id = os.environ['TELEGRAM_ACCOUNT_ID'],
         tg_notifications_channel_id = os.environ['TELEGRAM_NOTIFICATIONS_CHANNEL_ID'],
@@ -65,7 +67,7 @@ class TGInformer:
         es_user_index=os.environ['ES_USER_INDEX'],
         ): 
 
-        # 实例变量
+        # ES 相关变量
         self.ES_IP =es_ip
         self.ES_PORT = es_port
         self.ES_MESSAGE_INDEX = es_message_index
@@ -73,11 +75,15 @@ class TGInformer:
         self.ES_USER_INDEX = es_user_index
         self.es_message = []
 
-        self.channel_meta = {}                      # 已加入 channel 的信息
-        self.bot_task = None
-        self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
+        # 配置参数
         self.MIN_CHANNEL_JOIN_WAIT = 30
         self.MAX_CHANNEL_JOIN_WAIT = 120
+        self.CHANNEL_REFRESH_WAIT = 15 * 60         # 重新检查的间隔（15min）
+        self.models = models
+
+        # 数据连接部分
+        self.channel_meta = {}                      # 已加入 channel 的信息
+        self.bot_task = None
         self.client = None
         self.loop = asyncio.get_event_loop()
 
@@ -210,20 +216,21 @@ class TGInformer:
             os.makedirs(picture_path)
             logging.info(f'Create the picture dir:{picture_path}')
 
-        message_path = './message'
-        if not os.path.exists(message_path):
-            os.makedirs(message_path)
-            logging.info(f'Create the message dir:{message_path}')
+        if self.models == '1':
+            message_path = './message'
+            if not os.path.exists(message_path):
+                os.makedirs(message_path)
+                logging.info(f'Create the message dir:{message_path}')
 
-        channel_path = './channel_info'
-        if not os.path.exists(channel_path):
-            os.makedirs(channel_path)
-            logging.info(f'Create the channel info dir:{channel_path}')
+            channel_path = './channel_info'
+            if not os.path.exists(channel_path):
+                os.makedirs(channel_path)
+                logging.info(f'Create the channel info dir:{channel_path}')
 
-        user_path = './user_info'
-        if not os.path.exists(user_path):
-            os.makedirs(user_path)
-            logging.info(f'Create the user info dir:{user_path}')
+            user_path = './user_info'
+            if not os.path.exists(user_path):
+                os.makedirs(user_path)
+                logging.info(f'Create the user info dir:{user_path}')
 
         # 处理新消息
         @self.client.on(events.NewMessage)
@@ -311,7 +318,8 @@ class TGInformer:
         # self.flush_status_in_sql(e)
 
         # 将 message 存储
-        self.store_message_in_json_file(e)
+        if self.models == '1':
+            self.store_message_in_json_file(e)
         self.store_message_in_sql(e)
         if self.ES_MESSAGE_INDEX != '' and self.es_connect != None:
             self.updata_es_message(e)
@@ -580,7 +588,8 @@ class TGInformer:
         """ 
         将 channel 信息存储下来
         """ 
-        self.store_channel_info_in_json_file(channel_info)
+        if self.models == '1':
+            self.store_channel_info_in_json_file(channel_info)
         self.store_channel_info_in_sql(channel_info)
         if self.ES_CHANNEL_INDEX != '' and self.es_connect != None:
             self.updata_channel_to_es(channel_info)
@@ -618,7 +627,8 @@ class TGInformer:
         e = await self.get_user_info_from_dialog(dialog)
         if e == []:
             return 
-        self.store_user_info_in_json_file(e,dialog)
+        if self.models == '1':
+            self.store_user_info_in_json_file(e,dialog)
         self.store_user_info_in_sql(e,dialog)
         if self.ES_USER_INDEX != '' and self.es_connect != None:
             self.updata_user_to_es(e)

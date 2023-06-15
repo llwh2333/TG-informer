@@ -30,6 +30,7 @@ if not account_id:
 if __name__ == '__main__':
 
     informer = TGInformer(
+        models = os.environ['INFO_DUMP_LOCAL'],
         db_database = os.environ['MYSQL_DATABASE'],
         db_user = os.environ['MYSQL_USER'],
         db_password = os.environ['MYSQL_PASSWORD'],
