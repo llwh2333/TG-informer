@@ -26,7 +26,8 @@ import json
 from telethon.tl import types
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
-
+from itertools import groupby
+from urlextract import URLExtract
 """ 
 监控 tg
 """ 
@@ -83,6 +84,7 @@ class TGInformer:
 
         # 数据连接部分
         self.channel_meta = {}                      # 已加入 channel 的信息
+        self.Note_key = []                          # 报警关键字
         self.bot_task = None
         self.client = None
         self.loop = asyncio.get_event_loop()
@@ -307,6 +309,9 @@ class TGInformer:
             # 两者均不是，跳过
             return
         
+        # 消息分析处理
+        tag = await self.analysis_message(event,channel_id)
+
         #检查消息是否含有图片，如果有图片，就存储图片到本地（picture 文件中）
         if event.message.media is not None:
             logging.info(f'the message have media')
@@ -314,7 +319,7 @@ class TGInformer:
             if message == '':
                 message = 'picture:'+str(channel_id)+'_'+self.GetImageName(event)
 
-        e = await self.get_message_info_from_event(event,channel_id)
+        e = await self.get_message_info_from_event(event,channel_id,tag)
         # self.flush_status_in_sql(e)
 
         # 将 message 存储
@@ -324,7 +329,7 @@ class TGInformer:
         if self.ES_MESSAGE_INDEX != '' and self.es_connect != None:
             self.updata_es_message(e)
 
-    async def get_message_info_from_event(self,event,channel_id):
+    async def get_message_info_from_event(self,event,channel_id,tag):
         """ 
         从 event 中获得需要的 info
         """ 
@@ -429,7 +434,8 @@ class TGInformer:
             'reply_message_id':reply_message_id,
             'reply_message_date':reply_message_date,
             'reply_message_times':reply_message_times,
-            'message_channel_size':0
+            'message_channel_size':0,
+            'tag':tag
             }
         return message_info
 
@@ -901,7 +907,7 @@ class TGInformer:
             result = es.indices.create(index=es_index)
             logging.info ('creat index new_message_info')
         else:
-            logging.info(' message_info index exit')
+            logging.info(' message_info index exist')
 
         # 批量上传
         actions = (
@@ -929,7 +935,7 @@ class TGInformer:
             result = es.indices.create(index=es_index)
             logging.info ('creat index channel')
         else:
-            logging.info(' channel index exit')
+            logging.info(' channel index exist')
 
         # 将要上传的数据
         es_channel = {
@@ -964,7 +970,7 @@ class TGInformer:
             result = es.indices.create(index=es_index)
             logging.info ('creat index user')
         else:
-            logging.info(' user index exit')
+            logging.info(' user index exist')
 
         actions = (
             {
@@ -979,4 +985,372 @@ class TGInformer:
         # 将数据进行上传
         n,_ = bulk(es, actions)
         logging.info(f'es data: total:{len(users_info)} user, insert {n} user successful')
+
+    async def analysis_message(self,event,channel_id):
+        """ 
+        TODO: 对消息进行处理、分析
+        """ 
+        #对消息中的虚拟身份进行提取
+        await self.extract_virtual_identity(event,channel_id)
+        #打标
+        tags = await self.tag_message(event)
+        await self.note_message(event)
+        #查看当前key word
+        if (event.raw_text == 'llwh_search_es'):
+            print('channel  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            self.view_channel_data()
+            print('message  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            self.view_message_data()
+            print('user  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            self.view_user_data()
+            print('vultr  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!ss!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            self.view_vultr_data()
+            print('warning data  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            self.view_warning_data()
+            print('key word  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            keys = self.set_note_key(key_type='v')
+            print(keys[0],keys[1])
+            keys = self.set_note_key(key_type = 'a',key_note='my key word!!')
+            print(keys[0],keys[1])
+            keys = self.set_note_key(key_type = 'd',key_note='my key word!!')
+            print(keys[0],keys[1])
+        return tags
+
+    async def tag_message(self,event):
+        """  
+        对消息进行打标
+        """  
+        return None
+
+    async def extract_virtual_identity(self,event,channel_id):
+        """ 
+        TODO:对消息中的虚拟身份进行提取
+        """ 
+        message_txt = event.raw_text
+
+        # 虚拟身份：qq、微信、手机、url、Email
+        # 虚拟身份、channel id、message id
+
+        vir_data = {
+            'channel_id':channel_id,
+            'message_id':event.message.id,
+            'message_txt':message_txt,
+            'vir_identity':{
+                'wechat':None,
+                'qq':None,
+                'phone':None,
+                'url':None,
+                'e-mail':None,
+                'id_card':None,
+            },
+        }
+
+        # 身份提取
+        text = message_txt
+        email_accounts = self.email_extract(text)
+        phone_accounts = self.phone_extract(text)
+        qq_accounts = self.qq_extract(text)
+        wechat_accounts = self.wechat_extract(text)
+        ids = self.ids_extract(text)
+        url_address = self.url_extract(text)
+
+
+        # 身份存储
+        vir_data['vir_identity']['wechat'] = wechat_accounts
+        vir_data['vir_identity']['qq'] = qq_accounts
+        vir_data['vir_identity']['phone'] = phone_accounts
+        vir_data['vir_identity']['url'] = url_address
+        vir_data['vir_identity']['e-mail'] = email_accounts
+        vir_data['vir_identity']['id_card'] = ids
+
+        if (len(wechat_accounts) + len(qq_accounts) + len(phone_accounts) + len(url_address) + len(email_accounts) + len(ids)) < 1:
+            return
+
+        es = self.es_connect
+
+        # 检查 index
+        es_index = 'vultr_identity'
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+        else:
+            logging.info(' vurtl index exist')
+
+        es_id = str(vir_data['channel_id'])+str(vir_data['message_id'])
+
+        n = es.index(index=es_index,doc_type='_doc',body=vir_data,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+
+    def  replace_chinese(self,text):
+        """ 
+        去除中文，替换位空格(默认非空字符串)
+        """  
+        filtrate = re.compile(u'[\u4E00-\u9FA5]')
+        text_without_chinese = filtrate.sub(r' ', text)
+        return text_without_chinese
+
+    def phone_extract(self,text):
+        """  
+        手机号提取
+        """  
+        if text=='':
+            return []
+        eng_texts = self.replace_chinese(text)
+        sep = ',!?:; ：，.。！？《》、|\\/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        eng_split_texts = [''.join(g) for k, g in groupby(eng_texts, sep.__contains__) if not k]
+        eng_split_texts_clean = [ele for ele in eng_split_texts if len(ele)>=7 and len(ele)<17]
+    
+        phone_pattern = r'^((\+86)?([- ])?)?(|(13[0-9])|(14[0-9])|(15[0-9])|(17[0-9])|(18[0-9])|(19[0-9]))([- ])?\d{3}([- ])?\d{4}([- ])?\d{4}$'
+
+        phones = []
+        for eng_text in eng_split_texts_clean:
+            result = re.match(phone_pattern, eng_text, flags=0)
+            if result:
+                phones.append(result.string.replace('+86','').replace('-',''))
+        return phones
+
+    def email_extract(self,text):
+        """  
+        email 提取
+        """ 
+
+        if text=='':
+            return []
+        eng_texts = self.replace_chinese(text)
+        eng_texts = eng_texts.replace(' at ','@').replace(' dot ','.')
+        sep = ',!?:; ，。！？《》、|\\/'
+        eng_split_texts = [''.join(g) for k, g in groupby(eng_texts, sep.__contains__) if not k]
+
+        email_pattern = r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z_-]+)+$'
+
+        emails = []
+        for eng_text in eng_split_texts:
+            result = re.match(email_pattern, eng_text, flags=0)
+            if result:
+                emails.append(result.string)
+        return emails
+
+    def ids_extract(self,text):
+        """ 
+        身份证号提取
+        """  
+        if text == '':
+            return []
+        eng_texts = self.replace_chinese(text)
+        sep = ',!?:; ：，.。！？《》、|\\/abcdefghijklmnopqrstuvwyzABCDEFGHIJKLMNOPQRSTUVWYZ'
+        eng_split_texts = [''.join(g) for k, g in groupby(eng_texts, sep.__contains__) if not k]
+        eng_split_texts_clean = [ele for ele in eng_split_texts if len(ele) == 18]
+
+        id_pattern = r'(^\d{15}$)|(^\d{18}$)|(^\d{17}(\d|X|x)$)'
+
+        ids = []
+        for eng_text in eng_split_texts_clean:
+            result = re.match(id_pattern, eng_text, flags=0)
+            if result:
+                ids.append(result.string)
+        return ids
+
+    def url_extract(self,text):
+        """  
+        url 提取
+        """ 
+        extractor = URLExtract()
+        url_address = extractor.find_urls(text)
+        return url_address
+
+    def qq_extract(self,text):
+        """  
+        qq 提取
+        """ 
+        if text=='':
+            return []
+        eng_texts = self.replace_chinese(text)
+        sep = '@,!?:; ：，.。！？《》、|\\/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        eng_split_texts = [''.join(g) for k, g in groupby(eng_texts, sep.__contains__) if not k]
+        eng_split_texts_clean = [ele for ele in eng_split_texts if len(ele)>=5 and len(ele)<13]
+
+        qq_pattern = r"[1-9][0-9]{4,11}"
+
+        qq_accounts = []
+        for eng_text in eng_split_texts_clean:
+            result = re.match(qq_pattern, eng_text, flags=0)
+            if result and (result.string not in qq_accounts):
+                qq_accounts.append(result.string)
+        return qq_accounts
+
+    def wechat_extract(self,text):
+        """  
+        wechat 提取
+        """ 
+        wechat_pattern = r'\b[a-zA-Z_]\w{5,19}\b'
+        wechat_accounts = re.findall(wechat_pattern, text)
+        return wechat_accounts
+
+    def set_note_key(self,key_type,key_note = None):
+        """  
+        TODO:操作报警关键字
+        a: add
+        d: delate
+        v: view
+        """ 
+        if (key_type == 'a'):
+            if key_note =='' or type(key_note)!=type('a'):
+                return ['key is illegal',self.Note_key]
+            for i in self.Note_key:
+                if i == key_note:
+                    return ['key is existing',self.Note_key]
+            self.Note_key.append(key_note)
+            return ['key add successfully',self.Note_key]
+
+        elif(key_type == 'd'):
+            if key_note =='' or type(key_note)!=type('a'):
+                return ['key is illegal',self.Note_key]
+            for i in self.Note_key:
+                if i == key_note:
+                    self.Note_key.remove(key_note)
+                    return ['remove '+key_note+' successfully',self.Note_key]
+            return ['key is not existing',self.Note_key]
+
+        elif(key_type == 'v'):
+            return ['successfully !!!',self.Note_key]
+
+        else:
+            return ['Unknown command',self.Note_key]
+
+    async def note_message(self,event):
+        """ 
+        TODO:检查警报消息
+        """  
+        note_keyword = []
+        for key in self.Note_key:
+            if key in event.raw_text:
+                note_keyword.append(key)
+        if note_key:
+            self.message_warning(event,note_keyword)
+
+    def message_warning(self,event):
+        """  
+        完成警报
+        """  
+        if isinstance(event.message.to_id, PeerChannel):
+            channel_id = event.message.to_id.channel_id
+        elif isinstance(event.message.to_id, PeerChat):
+            channel_id = event.message.to_id.chat_id
+
+        warning_data = {
+            'message_id':event.message_id,
+            'channel_id' : channel_id,
+            'message_txt' : event.raw_text,
+        }
+
+        c
+
+        # 检查 index
+        es_index = 'warning_data'
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+        else:
+            logging.info(' warning data index exist')
+
+        es_id = str(warning_data['channel_id'])+str(warning_data['message_id'])
+
+
+        n = es.index(index=es_index,doc_type='_doc',body=warning_data,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)}')
+        pass
+
+    def view_warning_data(self):
+        """  
+        查询
+        """  
+
+        es = self.es_connect
+
+        # 检查 index
+        es_index = 'warning_data'
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+        else:
+            logging.info(' warning data index exist')
+        
+        body={
+            "query": {
+                "match_all": {}
+                }
+            }
+        result = es.search(index='warning_data',body=body,size=1000)
+        print(f'data info:{json.dumps(result,ensure_ascii=False,indent=4)}')
+        return result
+
+    def view_channel_data(self):
+        """  
+        查询 channel 信息
+        """  
+
+        es = self.es_connect
+        body={
+            "query": {
+                "match_all": {}
+                }
+            }
+        result = es.search(index=self.ES_CHANNEL_INDEX,body=body,size=1000)
+        print(f'data info:{json.dumps(result,ensure_ascii=False,indent=4)}')
+        return result
+
+    def view_user_data(self):
+        """  
+        查询 user 信息
+        """  
+
+        es = self.es_connect
+        body={
+            "query": {
+                "match_all": {}
+                }
+            }
+        result = es.search(index=self.ES_USER_INDEX,body=body,size=1000)
+        print(f'data info:{json.dumps(result,ensure_ascii=False,indent=4)}')
+        return result
+
+    def view_message_data(self):
+        """  
+        查询 message 信息
+        """  
+        es = self.es_connect
+        body={
+            "query": {
+                "match_all": {}
+                }
+            }
+        result = es.search(index=self.ES_MESSAGE_INDEX,body=body,size=1000)
+        print(f'data info:{json.dumps(result,ensure_ascii=False,indent=4)}')
+        return result
+        pass
+
+    def view_vultr_data(self):
+        """  
+        查询 vultr identity 信息
+        """  
+        es = self.es_connect
+        es_index = 'vultr_identity'
+        if not es.indices.exists(index=es_index):
+            logging.info('begin creat')
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+        else:
+            logging.info(' vultr index exist')
+
+        body={
+            "query": {
+                "match_all": {}
+                }
+            }
+        result = es.search(index='vultr_identity',body=body,size=1000)
+        print(f'data info:{json.dumps(result,ensure_ascii=False,indent=4)}')
+        return result
 
