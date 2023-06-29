@@ -74,7 +74,7 @@ class TGInformer:
         self.ES_MESSAGE_INDEX = es_message_index
         self.ES_CHANNEL_INDEX = es_channel_index
         self.ES_USER_INDEX = es_user_index
-        self.es_message = []
+        self.es_messages = []
 
         # 配置参数
         self.MIN_CHANNEL_JOIN_WAIT = 30
@@ -888,7 +888,7 @@ class TGInformer:
         es_message.update(reply_data)
 
         with self.lock_es_message:
-            self.es_message.append(es_message)
+            self.es_messages.append(es_message)
 
     async def updata_message_to_es(self):
         """ 
@@ -897,8 +897,8 @@ class TGInformer:
         # 获取消息
         es = self.es_connect
         with self.lock_es_message:
-            message_info = self.es_message
-            self.es_message = []
+            message_info = self.es_messages
+            self.es_messages = []
 
         # 检查 index
         es_index = self.ES_MESSAGE_INDEX
@@ -914,7 +914,7 @@ class TGInformer:
             {
                 '_index': es_index,
                 '_type': '_doc',
-                '_id': str(Message.pop('channel_id'))+str(Message.pop('message_id')),
+                '_id': str(Message['channel_id'])+str(Message['message_id']),
                 '_source': Message
             }
             for Message in message_info
