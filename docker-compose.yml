@@ -2,6 +2,13 @@
 version: '3.5'
 #docker >= 17.12
 
+networks:
+  extnetwork:
+    ipam:
+      config:
+       - subnet: 172.19.0.0/16
+        # getway: 172.19.0.1
+
 services: 
 
   # ================
@@ -12,11 +19,32 @@ services:
       - informer.env
     container_name: db_informer
     image: mysql:5.7
+    networks:
+      extnetwork:
+        ipv4_address: 172.19.0.11
     volumes:
      - db_data:/var/lib/mysql
      - ./my.cnf:/etc/mysql/my.cnf
-    ports:
-     - "3307:3306"
+
+  # ================
+  # Informer Service
+  # ================
+  app_informer:
+    env_file:
+      - informer.env
+    build: .
+    container_name: app_informer
+    networks:
+      extnetwork:
+        ipv4_address: 172.19.0.12
+    volumes:
+      - app/:/usr/local/app
+    stdin_open: true
+    tty: true
+    depends_on:
+      - db_informer
+    links:
+      - db_informer
 
 
 
@@ -33,6 +61,7 @@ services:
 
 volumes:
   db_data: {}
+  app: {}
 
 
 
