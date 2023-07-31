@@ -15,13 +15,13 @@ RUN set -ex \
     && cd /home/data \
     && ls \
     && cd /home/data/openssl-1.1.1q \
-    && ./config --prefix=/usr/local/openssl-1.1.1 \
+    && /bin/bash ./config --prefix=/usr/local/openssl-1.1.1 \
     && make && make install 
 
 RUN set -ex \
     && ls \
     && cd /home/data/Python-3.10.6 \
-    && ./configure prefix=/usr/local/python --enable-optimizations --with-openssl=/usr/local/openssl-1.1.1 --with-openssl-rpath=auto \
+    && /bin/bash ./configure prefix=/usr/local/python --enable-optimizations --with-openssl=/usr/local/openssl-1.1.1 --with-openssl-rpath=auto \
     && make altinstall
 
 RUN set -ex \
