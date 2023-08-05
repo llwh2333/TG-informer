@@ -618,7 +618,7 @@ class TGInformer:
         """  
         # 获取数据
         message_date = int(datetime.timestamp(message_info['tcreate']))*1000
-        write = int(datetime.timestamp(message_info['write'])*1000)
+        write = message_info['write']
         to_id = self.strip_pre(message_info['channel_id'])
         es_message = {
             'natures':message_info['natures'],
@@ -965,7 +965,11 @@ class TGInformer:
         channel_access_hash = None
         is_private = True
         if dialog.is_channel:
-            channel_access_hash = dialog.entity.access_hash
+            if hasattr(dialog.entity , 'access_hash'):
+                channel_access_hash = dialog.entity.access_hash
+            else :
+                logging.error(f"don't get access for {dialog.name}")
+                channel_access_hash = None
             if dialog.entity.username is not None:
                 is_private = False
             else:
@@ -999,19 +1003,28 @@ class TGInformer:
                 
         photo_path = r'./picture/info_picture/'+str(dialog.id)
         real_photo_path = None
-        real_photo_path = await self.client.download_media(dialog.entity.photo)
-
+        try:
+            real_photo_path = await self.client.download_media(dialog.entity.photo,file=photo_path)
+        except Exception:
+            logging.error(Exception)
         channel_id = dialog.id if dialog.id else None
         channel_name = dialog.name if dialog.name else None
         channel_title = dialog.title if dialog.title else None
         is_mega_group = True if dialog.is_group and dialog.is_channel else False
         is_group = dialog.is_group
-        is_restricted = dialog.entity.restricted if dialog.is_channel else None
+        if not hasattr(dialog.entity,'restricted'):
+            logging.error(f'{dialog.name} not has restricted')
+            is_restricted = None
+        else:
+            is_restricted = dialog.entity.restricted if dialog.is_channel else None
+
         is_broadcast = dialog.is_channel
         username = dialog.entity.username if dialog.is_channel else None
-        channel_date = dialog.entity.date
-        is_restricted = dialog.entity.restricted if dialog.is_channel else None
-        
+        if not hasattr(dialog.entity,'date'):
+            logging.error(f'{dialog.name} not has data')
+            channel_date = None
+        else:
+            channel_date = dialog.entity.date
         channel_info = {
             'channel_id':channel_id,            # -100类型
             'channel_name':channel_name,
@@ -1040,10 +1053,13 @@ class TGInformer:
         获得 channel 的用户人数
         """  
         size = 0
-        if dialog.is_channel:
-            size = dialog.entity.participants_count
-        elif dialog.is_group:
-            size = dialog.entity.participants_count
+        try:
+            if dialog.is_channel:
+                size = dialog.entity.participants_count
+            elif dialog.is_group:
+                size = dialog.entity.participants_count
+        except Exception:
+            logging.error(f"ERROR: can't counting the {dialog.name}" )
         return size
 
     def store_channel_info_in_json_file(self,channel_info):
@@ -1083,7 +1099,10 @@ class TGInformer:
             logging.info ('creat index channel')
 
         channel_id = self.strip_pre(channel_info['channel_id'])
-        channel_date = int(datetime.timestamp(channel_info['channel_date']))*1000
+        if channel_info['channel_date'] == None:
+            channel_date = None
+        else:
+            channel_date = int(datetime.timestamp(channel_info['channel_date']))*1000
         # 将要上传的数据
         es_channel = {
             'date':channel_date,
@@ -1219,7 +1238,10 @@ class TGInformer:
         es_users_info = []
         for user_info in users_info:
             if user_info['user_date']:
-                user_date = int(datetime.timestamp(user_info['user_date']))*1000
+                if user_info['user_date'] == None:
+                    user_date = None
+                else:
+                    user_date = int(datetime.timestamp(user_info['user_date']))*1000
             else:
                 user_date = None
             es_user_info={
