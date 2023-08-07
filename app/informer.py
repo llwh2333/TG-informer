@@ -374,60 +374,57 @@ class TGInformer:
 
         is_scheduled = True if message_obj.from_scheduled is True else False
 
-        is_fwd = False if message_obj.fwd_from is None else True
-        if is_fwd:
-            fwd_message_date = message_obj.fwd_from.date
-            fwd_message_send_name = message_obj.fwd_from.from_name
-            fwd_message_times = message_obj.forwards
-            fwd_message_saved_id = message_obj.fwd_from.saved_from_msg_id
-            fwd_message_send_id = None
+        # 如果是转发消息
+        fwd_msg = None
+        if not message_obj.fwd_from is None:
+            fwd_msg = {
+                # 发送时间
+                'fwd_message_date': message_obj.fwd_from.date, 
+                # 原消息发送者名称
+                'fwd_message_from_name':message_obj.fwd_from.from_name,
+                # 转发次数
+                'fwd_message_times':message_obj.forwards,
+                # 原消息 id
+                'fwd_message_saved_msg_id':message_obj.fwd_from.saved_from_msg_id,
+                'fwd_message_imported':message_obj.fwd_from.imported,
+                'fwd_message_channel_post':message_obj.fwd_from.channel_post,
+                'fwd_message_post_author':message_obj.fwd_from.post_author,
+                'fwd_message_psa_type':message_obj.fwd_from.psa_type,
+            }
             if message_obj.fwd_from.from_id is not None:
                 if isinstance(message_obj.fwd_from.from_id, PeerUser):
-                    fwd_message_send_id = message_obj.fwd_from.from_id.user_id
+                    fwd_msg['fwd_message_from_id']= message_obj.fwd_from.from_id.user_id
                 elif isinstance(message_obj.fwd_from.from_id, PeerChat):
-                    fwd_message_send_id = message_obj.fwd_from.from_id.chat_id
+                    fwd_msg['fwd_message_from_id']=message_obj.fwd_from.from_id.chat_id
                 elif isinstance(message_obj.fwd_from.from_id, PeerChannel):
-                    fwd_message_send_id = message_obj.fwd_from.from_id.channel_id
+                    fwd_msg['fwd_message_from_id']=message_obj.fwd_from.from_id.channel_id
             else:
-                fwd_message_send_id = 000000000
-        else:
-            fwd_message_date = None
-            fwd_message_txt = None
-            fwd_message_send_name = None
-            fwd_message_send_id = None
-            fwd_message_saved_id = None
-            fwd_message_times = None
-        is_reply = False if message_obj.reply_to is None else True
-        if is_reply:
+                # 转发消息是匿名的
+                fwd_msg['fwd_message_from_id']: 000000000
+
+        # 如果回复了某消息
+        reply_msg = None
+        if not message_obj.reply_to is None:
             reply_obj = await event.get_reply_message()
-            if reply_obj == None:
-                is_reply = False
-                reply_message_txt = None
-                reply_message_send_id = None
-                reply_message_id = None
-                reply_message_date = None
-                reply_message_times = None
-            else:
-                reply_message_txt = reply_obj.message
-                reply_message_send_id = None
+            if reply_obj != None:
+                reply_msg = {
+                    'reply_message_txt':reply_obj.message,
+                    'reply_message_id':message_obj.reply_to.reply_to_msg_id,
+                    'reply_message_date':reply_obj.date,
+                    'reply_message_times':message_obj.replies,
+                    'reply_message_scheduled':meeeage_obj.reply_to.reply_to_scheduled,
+                    'reply_message_to_top_id':meeeage_obj.reply_to.reply_to_top_id,
+                    'reply_message_forum_topic':meeeage_obj.reply_to.forum_topic
+                }
                 if reply_obj.from_id is not None:
                     if isinstance(reply_obj.from_id, PeerUser):
-                        reply_message_send_id = reply_obj.from_id.user_id
+                        reply_msg['reply_message_from_id'] = reply_obj.from_id.user_id
                     elif isinstance(reply_obj.from_id, PeerChat):
-                        reply_message_send_id = reply_obj.from_id.chat_id
+                        reply_msg['reply_message_from_id'] =  reply_obj.from_id.chat_id
                     elif isinstance(reply_obj.from_id, PeerChannel):
-                        reply_message_send_id = reply_obj.from_id.channel_id
+                        reply_msg['reply_message_from_id'] = reply_obj.from_id.channel_id
                 else:
-                    reply_message_send_id = 000000000
-                reply_message_id = message_obj.reply_to.reply_to_msg_id 
-                reply_message_date = reply_obj.date
-                reply_message_times = message_obj.replies
-        else:
-            reply_message_txt = None
-            reply_message_send_id = None
-            reply_message_id = None
-            reply_message_date = None
-            reply_message_times = None
+                    reply_msg['reply_message_from_id'] = 000000000
 
         chat_user_id  =  event.sender_id
         if chat_user_id == None:
@@ -464,7 +461,7 @@ class TGInformer:
                     groupname = i['channel name']
                     groupabout = i['channel about']
                     break
-        if is_fwd:
+        if not fwd_msg is None:
             fwd_from = {
                 'date':fwd_message_date,
                 'from_id':fwd_message_send_id,
@@ -472,39 +469,10 @@ class TGInformer:
             }
         else:
             fwd_from = None
-        message_info = { 
-            'message_id':event.message.id,
-            'chat_user_id':chat_user_id,
-            'account_id':self.account['account_id'],                               # 傀儡账户 id
-            'channel_id':channel_id,                                            # 频道的 id
-            'message_text':event.raw_text,                                      # 消息内容
-            'is_bot':is_bot,                                            # 是否机器人发出
-            'is_group':is_group,
-            'is_private':is_private,
-            'is_channel':is_channel ,
-            'is_scheduled':is_scheduled,
-            'is_fwd':is_fwd,
-            'is_mention':is_mention,
-            'tcreate':message_obj.date,                         # 消息创建时间
-            'mentioned_user': mentioned_users,
-            'fwd_message_date':fwd_message_date,
-            'fwd_message_send_id':fwd_message_send_id, 
-            'fwd_message_send_name':fwd_message_send_name,
-            'fwd_message_saved_id':fwd_message_saved_id,
-            'fwd_message_times':fwd_message_times,
-            'is_reply':is_reply,
-            'reply_message_txt':reply_message_txt,
-            'reply_message_send_id':reply_message_send_id, 
-            'reply_message_id':reply_message_id,
-            'reply_message_date':reply_message_date,
-            'reply_message_times':reply_message_times,
-            'message_channel_size':0,
-            'tag':tag,
+
+        message_es = {
             'to_id_type':False,
-            'username':message_obj.post_author,
             'media':media,
-            'groupname':groupname,
-            'groupabout':groupabout,
             'write':int(datetime.timestamp(message_obj.date))*1000,
             'natures':'Unknown',        #可能是自然语言标注
             'classifyTag':None,         #分类标注
@@ -515,7 +483,37 @@ class TGInformer:
             'company':None,             #内容涉及的公司
             'fwd_from':fwd_from,
             'region':None,              #内容涉及的地区
+        }
+
+        message_info = { 
+            'message_id':event.message.id,
+            'chat_user_id':chat_user_id,
+            'account_id':self.account['account_id'],                            # 傀儡账户 id
+            'channel_id':channel_id,                                            # 频道的 id
+            'message_text':event.raw_text,                                      # 消息内容
+            'is_bot':is_bot,                                            # 是否机器人发出
+            'is_group':is_group,
+            'is_private':is_private,
+            'is_channel':is_channel ,
+            'is_scheduled':is_scheduled,
+            'fwd_message':fwd_msg,
+            'reply_message':reply_msg,
+            'is_mention':is_mention,
+            'tcreate':message_obj.date,                         # 消息创建时间
+            'mentioned_user': mentioned_users,
+            'message_channel_size':0,
+
+
+
+            'tag':tag,
+            'groupname':groupname,
+            'groupabout':groupabout,
+            'username':message_obj.post_author,
+
+            'message_es':message_es
             }
+
+
         return message_info
 
     def strip_pre(self,text):
