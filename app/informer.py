@@ -53,7 +53,7 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '1.2.0'
+version = '1.2.2'
 
 logFilename = './tgout.log'
 
@@ -1372,7 +1372,8 @@ class TGInformer:
                 count += 1
         except FloodWaitError as e:
             logging.error(f'get a floodwaiterror {e}')
-
+        except Exception as e:
+            logging.error(f" get a error {e}")
         logging.info(f'Logging the users account {count} ... \n')
         return users_info_list
 
