@@ -1,59 +1,62 @@
 ENV: 'local'
 
 # ---------------
-# ES config
-# ---------------
-ES_IP: ''
-ES_PORT: '9200'
-ES_MESSAGE_INDEX: ''
-ES_CHANNEL_INDEX: ''
-ES_USER_INDEX: ''
-ES_ACCOUNT_INDEX: null
-ES_VIR_INDEX: ''
-ES_MEDIO_INDEX: null
-
-
-# ---------------
 # Telegram config
 # ---------------
+####### 此处的 api 采用的是该账号的 api
+# api 的 id
+TELEGRAM_API_APP_ID: '27371494'
 
+# 获取 api 时候一起获得的 hash
+TELEGRAM_API_HASH: '0480705c4d4cf5de649f51c78d338408'
+
+####### tg 账号的一些基本信息
 # tg 账号的 id
-TELEGRAM_ACCOUNT_ID: '1234567889'
+TELEGRAM_ACCOUNT_ID: '6243089426'
 
-#api 的 id
-TELEGRAM_API_APP_ID: '12345678'
+# 用于监控账号的电话号码
+TELEGRAM_ACCOUNT_PHONE_NUMBER: '+15796995632'
 
-#获取 api 时候一起获得的 hash
-TELEGRAM_API_HASH: '123456678890qwerfgfhdgfuvduwvfx2'
+# 账号的用户名
+TELEGRAM_ACCOUNT_USER_NAME: '@accofx'
 
-#用于监控账号的电话号码
-TELEGRAM_ACCOUNT_PHONE_NUMBER: '+8612345667890'
+# 账号的名称
+TELEGRAM_ACCOUNT_FIRST_NAME: 'lwe'
+TELEGRAM_ACCOUNT_LAST_NAME: 'per'
 
-#账号的用户名
-TELEGRAM_ACCOUNT_USER_NAME: '@aaadsja'
-
-#账号的名称
-TELEGRAM_ACCOUNT_FIRST_NAME: 'aaa'
-TELEGRAM_ACCOUNT_LAST_NAME: 'aaa'
-
-#是否将会话信息存储到本地（json）格式
+# 是否将采集的信息存储到本地（json）格式
+# 1 存储；0 不存储
 INFO_DUMP_LOCAL: '1'
 
+# 采集数据传输方式
+# 0 不传输；1 es 传输；2 自定义
+INFO_UPDATA_TYPE: '1'
+
+# 是否跳过初次遍历成员
+# 1 跳过；0 不跳过
+SKIP_FIRST_UPDATA: '0'
 
 
 
+# ---------------
+# ES config
+# ---------------
+# 当上面的采集数据传输采用 es 传输时需要填写
+ES_IP: '115.160.185.148'
+ES_PORT: '27200'
+ES_MESSAGE_INDEX: 'telegram_msg_v6'
+ES_CHANNEL_INDEX: 'telegram_group_v7'
+ES_USER_INDEX: 'telegram_users_v7'
+ES_ACCOUNT_INDEX: null
+ES_MEDIO_INDEX: null
+ES_ACTIVE_USER_INDEX: 'telegram_active_user_v1'
 
 
 
-
-
-
-
-
-
-
-
-
+# ---------------
+# Custom config
+# ---------------
+# 需要根据用户自己的需求自己定义字段
 
 
 
