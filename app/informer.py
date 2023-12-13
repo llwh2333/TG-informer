@@ -271,7 +271,7 @@ class TGInformer:
                 await self.Dump_Channel_Info(e)
 
                 # 用户的更新不再进行这种批量更新
-                #await self.dump_channel_user_info(dialog)
+                await self.Dump_Channel_User_Info(dialog,e)
                 count +=1
         
         logging.info(f'########## Channel Count:{count}')
@@ -533,7 +533,7 @@ class TGInformer:
         vir_data = {}
 
         email_accounts = self.Extract_Email(Text)
-        phone_accounts = self.Extract_phone(Text)
+        phone_accounts = self.Extract_Phone(Text)
         qq_accounts = self.Extract_QQ(Text)
         wechat_accounts = self.Extract_Wechat(Text)
         ids = self.Extract_Ids(Text)
@@ -591,7 +591,7 @@ class TGInformer:
         text_without_chinese = filtrate.sub(r' ', Text)
         return text_without_chinese
 
-    def Extract_phone(self,Text:str):
+    def Extract_Phone(self,Text:str):
         """ 
         手机号提取
         @param Text: 待提取的消息
@@ -615,7 +615,7 @@ class TGInformer:
         union_set = set()
         for i in phones:
             if i not in union_set:
-                union_set.updata(i)
+                union_set.update(i)
                 virtual.append(i)
         if virtual == []:
             return None
