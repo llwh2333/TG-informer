@@ -39,6 +39,8 @@ from geotext import GeoText
 import jionlp as jio
 import copy
 import queue
+import telegram_pb2
+import pika
 
 """ 
 监控程序主要部分
@@ -54,8 +56,8 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '2.0.1'
-update_time = '2023.12.06'
+version = '2.0.2'
+update_time = '2023.12.07'
 
 logFilename = './tgout.log'
 
@@ -146,7 +148,10 @@ class TGInformer:
         根据配置，加载采集数据的传输目标
         @param Env: 配置文件中的参数
         """ 
-        if self.UPDATA_MODEL == '1':
+        if self.UPDATA_MODEL == '0':
+            # 没有传输目标，所以无需建立连接
+            pass
+        elif self.UPDATA_MODEL == '1':
             # ES 为传输目标进行加载
             self.ES_IP =Env['ES_IP']            # es 服务器 ip
             self.ES_PORT = Env['ES_PORT']       # es 服务器端口
@@ -161,67 +166,14 @@ class TGInformer:
             if self.ES_CONNECT == None:
                 sys.exit(0)
         elif self.UPDATA_MODEL == '2':
-            # 自定义的传输目标
-            self.CUSTOM_CONNECT = self.Custom_Connect()
-        elif self.UPDATA_MODEL == '0':
-            # 没有传输目标，所以无需建立连接
-            pass
+            # 采用 rabbitmq 的方法传输数据
+            self.MQ_CONNECT = self.Mq_Connect(Env)
+        elif self.UPDATA_MODEL == '3':
+            # 采用用户自定义的方法传输数据
+            self.CUSTOM_CONNECT = self.Custom_Connect(Env)
         else:
             # 其它情况，也可以认为是没有传输目标，所以无需建立连接
             pass
-
-    def Es_Connect(self,Times:int):
-        """ 
-        根据配置连接上 Es 服务器（无密码版本）
-        最终返回建立好的连接或 none 值
-        @param Times: 尝试连接次数上限
-        @return: es 连接
-        """ 
-        es_connect = None
-        try:
-            if (self.ES_IP != '' and self.ES_PORT != ''):
-                address = f"http://{self.ES_IP}:{self.ES_PORT}"
-                es_connect = Elasticsearch([address])
-            else:
-                logging.error('You ip or port is None!!!!')
-        except ConnectionError as e:
-            logging.error(f'Received an error {e} \n Error raised by the HTTP connection!!! we will try againe.')
-            es_connect = self.Es_Rebuilt(Times,address)
-        except ConnectionTimeout as e:
-            logging.error(f'Received an error {e} \n Connection timed out during an operation!!! we will try againe.')
-            es_connect = self.Es_Rebuilt(Times,address)
-        except Exception as e:
-            logging.error(f"Received an error {e} exit!!")
-        return es_connect
-        
-    def Es_Rebuilt(self,Times:int,Address:str):
-        """ 
-        尝试重新建立 ES 连接
-        返回最终建立好的连接或 none 值
-        @param Times: 重试次数上限
-        @param Adress: es 地址
-        @return: es 连接
-        """  
-        es_connect = None
-        for i in range(0,Times):
-            logging.info(f'Attempting times:{i+1}......')
-            try:
-                es_connect = Elasticsearch([Address])
-                if es_connect :
-                    break
-                else:
-                    logging.error(f'The {i+1}th times Connection is Wrong!!!')
-            except Exception as e:
-                logging.error(f'The {i+1}th times Connection is Wrong!!!')
-        if es_connect == None:
-            logging.error('ES connection rebuilt is wrong!!!!!!!!!')
-        return es_connect
-
-    def Custom_Connect(self):
-        """ 
-        用户自定的传输目标，需要用户自己去实现
-        """
-        pass
 
     def UPDATA_BACK(self):
         """ 
@@ -274,6 +226,7 @@ class TGInformer:
             # 会话不能是用户间的对话
             if not dialog.is_user:
                 channel_id = dialog.id 
+                channel_id = self.Strip_Pre(channel_id)
                 # 线程安全的加入会话信息
                 with self.LOCK_CHANNEL_ADD:
                     for i in self.CHANNEL_META:
@@ -302,7 +255,7 @@ class TGInformer:
                         except Exception as e:
                             logging.error(f"Get an error: {e}")
                         self.CHANNEL_META.append({
-                            'channel id':dialog.id,
+                            'channel id':self.Strip_Pre(dialog.id),
                             'channel name':dialog.name,
                             'channel about': about,
                             })
@@ -394,20 +347,6 @@ class TGInformer:
             # 通过协程存储当前的新 msg
             await self.Msg_Handler(event)
 
-        # 处理群组出现的事件
-        @self.CLIENT.on(events.ChatAction)
-        async def Chat_Event_Handle(event):
-            # 等待测试中
-            #await self.Chat_Updata(event)
-            pass
-
-        # 处理用户出现更新的情况
-        @self.CLIENT.on(events.UserUpdate)
-        async def User_Event_Handle(event):
-            # 等待测试中
-            #await self.User_Updata(event)
-            pass
-
         # 每隔 10s 上传一次 message
         while True:
             await self.Transfer_Msg()
@@ -442,7 +381,6 @@ class TGInformer:
         """ 
         在第一次启动程序时将遍历当前账户中的 channel 的所有信息（跳过对成员 user 信息的遍历），并传输到存储服务器上
         """ 
-        count = 0                                           # 群组总数
         async for dialog in self.CLIENT.iter_dialogs():
             if not dialog.is_user:
                 e = await self.Get_Channel_Info_By_Dialog(dialog)
@@ -460,7 +398,7 @@ class TGInformer:
                 # 上传群组信息
                 await self.Dump_Channel_Info(e)
 
-        logging.info(f'{sys._getframe().f_code.co_name}:Channel Count:{count} ;Monitoring channel: {json.dumps(self.CHANNEL_META ,ensure_ascii=False,indent=4)}')
+        logging.info(f'{sys._getframe().f_code.co_name}:Channel Count:{len(self.CHANNEL_META)} ;Monitoring channel: {json.dumps(self.CHANNEL_META ,ensure_ascii=False,indent=4)}')
 
     async def Msg_Handler(self,Event:events):
         """ 
@@ -503,6 +441,7 @@ class TGInformer:
         }
         return result
 
+    # MSG 处理部分
     def Tag_Msg(self,Text:str):
         """ 
         对 msg 内容进行打标，目前从：地区、语言类型方向打标
@@ -755,6 +694,7 @@ class TGInformer:
             return None
         return url_address
 
+    # MSG 属性部分
     async def Msg_Media(self,Event:events):
         """ 
         检查是否是多媒体文件，并提取多媒体文件的信息
@@ -822,6 +762,8 @@ class TGInformer:
         else:
             channel_id = 'None'
         now = datetime.now()
+        if channel_id  != 'None':
+            channel_id = self.Strip_Pre(channel_id)
         file_path = file_path+ '/'+str(channel_id)+'/'+now.strftime("%y_%m_%d")
         if not os.path.exists(file_path):
             os.makedirs(file_path)
@@ -864,7 +806,7 @@ class TGInformer:
         is_bot = False if message_obj.via_bot_id is None else True
         is_scheduled = True if message_obj.from_scheduled is True else False
         msg_content = Event.raw_text
-
+        channel_id = self.Strip_Pre(channel_id)
         # 提到的用户检测
         mentioned_users = []
         mentioned_break = False
@@ -1132,9 +1074,9 @@ class TGInformer:
         if Full_Msg['fwd_message'] is not None:
             fwd_date = int(datetime.timestamp(Full_Msg['fwd_message']['fwd_message_date']))*1000
             format_fwd = {
-                'data':fwd_date,
+                'date':fwd_date,
                 'from_id':Full_Msg['fwd_message']['fwd_message_send_id'],
-                'channel_id':Full_Msg['fwd_message']['fwd_message_send_id'],
+                'channel_id':self.Strip_Pre(Full_Msg['fwd_message']['fwd_message_send_id']),
             }
         format_media = None
         if Full_Msg['media'] is not None:
@@ -1206,70 +1148,8 @@ class TGInformer:
         with self.LOCK_UPDATA_MSG:
             self.UPDATA_MESSAGE.append(Format_Msg)
 
-    async def Transfer_Msg(self):
-        """ 
-        根据配置选项，定期对监听到的 msg 进行传输
-        """ 
-        if self.UPDATA_MODEL == '1':
-            # ES 为传输目标
-            self.Msg_Es_Transfer()
-        elif self.UPDATA_MODEL == '2':
-            # 自定义的传输目标
-            self.Msg_Custom_Transfer()
-        elif self.UPDATA_MODEL == '0':
-            # 没有传输目标
-            self.Msg_None_Transfer()
-        else:
-            # 其它情况，也可以认为是没有传输目标
-            self.Msg_None_Transfer()
 
-    def Msg_Es_Transfer(self):
-        """
-        msg 的属性需要传输给 es 服务器上
-        """ 
-
-        es = self.ES_CONNECT
-        with self.LOCK_UPDATA_MSG:
-            messages_info = copy.deepcopy(self.UPDATA_MESSAGE)
-            self.UPDATA_MESSAGE = []
-
-        # 批量上传
-        if messages_info == []: 
-            return
-
-        # 检查 index
-        es_index = self.ES_MESSAGE_INDEX
-        if es_index == None :
-            logging.error('Es msg index is None!!!!! Fix it !!')
-            sys.exit(0)
-        if not es.indices.exists(index=es_index):
-            result = es.indices.create(index=es_index)
-            logging.info ('creat index new_message_info')
-        actions = (
-            {
-                '_index': es_index,
-                '_type': '_doc',
-                '_id': str(Message['to_id'])+'_'+str(Message['id']),
-                '_source': Message,
-            }
-            for Message in messages_info
-        )
-        n,_ = bulk(es, actions)
-        logging.info(f'es data: total:{len(messages_info)} message, insert {n} message successful')
-
-    def Msg_Custom_Transfer(self):
-        """
-        需要用户自定义传输方法，默认调用无目标的函数
-        """ 
-        self.Msg_None_Transfer()
-
-    def Msg_None_Transfer(self):
-        """
-        没有传输目标，所以需要清空
-        """ 
-        with self.LOCK_UPDATA_MSG:
-            self.UPDATA_MESSAGE = []
-
+    # Channel 部分
     async def Get_Channel_Info_By_Dialog(self,Dialog:Dialog):
         """ 
         从会话中获得 channel 的信息
@@ -1437,7 +1317,7 @@ class TGInformer:
         update_time = int(datetime.timestamp(Full_Channel['update_time'])*1000) if Full_Channel['update_time'] is not None else None
 
         format_channel = {
-            'id':Full_Channel['channel_id'],
+            'id':self.Strip_Pre(Full_Channel['channel_id']),
             'title':Full_Channel['channel_title'],
             'photo':Full_Channel['channel_photo'],
             'megagroup':Full_Channel['is_megagroup'],
@@ -1465,54 +1345,7 @@ class TGInformer:
 
         self.Store_Data_Json(json_file_name, self.LOCK_CHANNEL,str(Format_Channel['id']), Format_Channel)
 
-    def Transfer_Channel(self,Format_Channel:dict):
-        """ 
-        根据配置选项，对得到的 channel 信息进行传输
-        """ 
-        if self.UPDATA_MODEL == '1':
-            # ES 为传输目标
-            self.Channel_Es_Transfer(Format_Channel)
-        elif self.UPDATA_MODEL == '2':
-            # 自定义的传输目标
-            self.Channel_Custom_Transfer(Format_Channel)
-        elif self.UPDATA_MODEL == '0':
-            # 没有传输目标
-            pass
-        else:
-            # 其它情况，也可以认为是没有传输目标
-            pass
-
-    def Channel_Es_Transfer(self,Format_Channel:dict):
-        """ 
-        channel 的属性需要传输给 es 服务器上
-        @param Format_Channel: 规范的channel 属性
-        """ 
-
-        es = self.ES_CONNECT
-
-        # 检查 index
-        es_index = self.ES_CHANNEL_INDEX
-        if es_index == None :
-            logging.error('Es channel index is None!!!!! Fix it !!')
-            sys.exit(0)
-        if not es.indices.exists(index=es_index):
-            result = es.indices.create(index=es_index)
-            logging.info ('creat index channel')
-
-        channel_id = self.Strip_Pre(Format_Channel['id'])
-        es_id = channel_id
-
-        # 将数据进行上传
-        n = es.index(index=es_index,doc_type='_doc',body=Format_Channel,id = es_id)
-        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-
-    def Channel_Custom_Transfer(self,Format_Channel:dict):
-        """ 
-        需要用户自定义传输方法，默认采用 pass
-        @param Format_Channel: 规范的channel 属性
-        """ 
-        pass
-
+    # User 部分
     async def Dump_Channel_User_Info(self,Dialog:Dialog,Channel_Info:dict):
         """ 
         将会话的所有成员的信息存储下来
@@ -1615,7 +1448,7 @@ class TGInformer:
         logging.info(f'Logging the users account {len(users_info_list)} ... \n')
         return users_info_list
 
-    def Format_Users(self,Users_Info:dict,Channel_Info:dict):
+    def Format_Users(self,Users_Info:list,Channel_Info:dict):
         """ 
         将获得的 users 完整信息转换为符合需求的格式
         @param Users_Info: 完整的 user 的信息
@@ -1666,62 +1499,7 @@ class TGInformer:
         json_file_name = './local_store/user_info/'+file_date+'_chat_user.json'
         self.Store_Data_Json(json_file_name, self.LOCK_CHAT_USER, str(Format_Users[0]['channel']['id']),Format_Users)
 
-    def Transfer_Users(self,Format_Users:dict):
-        """ 
-        根据配置，进行相应的信息保存操作
-        @param Format_Users: 规范的 users 信息列表
-        """ 
-        if self.UPDATA_MODEL == '1':
-            # ES 为传输目标
-            self.Users_Es_Transfer(Format_Users)
-        elif self.UPDATA_MODEL == '2':
-            # 自定义的传输目标
-            self.Users_Custom_Transfer(Format_Users)
-        elif self.UPDATA_MODEL == '0':
-            # 没有传输目标
-            pass
-        else:
-            # 其它情况，也可以认为是没有传输目标
-            pass
-
-    def Users_Es_Transfer(self,Format_Users:dict):
-        """ 
-        channel 的属性需要传输给 es 服务器上
-        @param Format_Users: 规范的 users 列表
-        """ 
-
-        es = self.ES_CONNECT
-
-        # 检查 index
-        es_index = self.ES_USER_INDEX
-        if es_index == None :
-            logging.error('Es users index is None!!!!! Fix it !!')
-            sys.exit(0)
-        if not es.indices.exists(index=es_index):
-            result = es.indices.create(index=es_index)
-            logging.info ('creat index user')
-
-        actions = (
-            {
-                '_index': es_index,
-                '_id':str(User_info['channel']['id'])+'_'+str(User_info['id']),
-                '_source':User_info,
-            }
-            for User_info in Format_Users
-        )
-
-        # 将数据进行上传
-        n,_ = bulk(es, actions)
-        logging.info(f'total:{len(Format_Users)} user, insert {n} user successful')
-
-    def Users_Custom_Transfer(self,Format_Users:dict):
-        """ 
-        需要用户自定义传输方法，默认采用 pass
-        @param Format_Users: 规范的 users 列表
-        """ 
-        pass
-
-    # 以下均为实验性代码，能否有用，等待测试
+    # Updata 部分
     async def Chat_Updata(self,Event:events):
         """ 
         处理 chat 中出现的更新消息
@@ -1730,49 +1508,11 @@ class TGInformer:
         chat_index = self.ES_CHANNEL_INDEX
         chat = Event.get_chat()
         chat_id = Event.chat_id
-        if Event.new_photo:
-            pair = {
-                'channel_id':chat_id,
-                'account_id':self.account['account_id'],
-            }
-            data = self.es_search(index=chat_index,filed=pair)
-            if data == None:
-                return
-            chat_data = data['_source']
-            es_id = data['_id']
-            now = datetime.now()
-            update_time = int(datetime.timestamp(now)*1000)
-            day_str = now.strftime("%y_%m_%d")
-            photo_path = f"./picture/channel/{str(chat_id)}.jpg"
-            if os.path.exists(photo_path):
-                old_name = f"./picture/channel/{str(chat_id)}_{day_str}.jpg"
-                os.rename(photo_path,old_name)
-            try :
-                real_photo_path = await self.CLIENT.download_profile_photo(Event.input_chat,file=photo_path)
-                chat_data['channel_photo'] = real_photo_path
-                chat_data['updata_time'] = update_time
-                n = es.index(index=chat_index,body=chat_data,id = es_id)
-                logging.info(f'es Channel photo data update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-            except Exception as e:
-                logging.error(f" Channel photo updata get an error:{e}")
-        elif Event.user_joined:
-            user_index = self.ES_USER_INDEX
-            pair = {
-                'channel_id':chat_id,
-                'account_id':self.account['account_id'],
-            }
-            data = self.es_search(index=chat_index,filed=pair)
-            if data == None:
-                return
-            chat_data = data['_source']
-            es_id = data['_id']
-            now = datetime.now()
-            update_time = int(datetime.timestamp(now)*1000)
-            chat_data['updata_time'] = update_time
-            chat_data['participants_count'] = chat.participants_count
-            n = es.index(index=chat_index,body=chat_data,id = es_id)
-            logging.info(f'es Channel user added update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
+        chat_id = self.Strip_Pre(chat_id)
+        if Event.user_joined:
             user = Event.get_user()
+            now = datetime.now()
+            update_time = int(datetime.timestamp(now)*1000)
             real_photo_path = None
             photo_path = f"./picture/user/{str(user.id)}.jpg"
             user_input = Event.get_input_user()
@@ -1815,135 +1555,500 @@ class TGInformer:
                 'user_phone':user.phone,
                 'is_deleted':user.deleted,
                 'user_photo':real_photo_path,  
-                'super':is_super,
-                'update':update_time,
                 'last_date':last_data,
                 'user_about':user_about,
+                'super':is_super,
+                'update':update_time,
             }
-            es_user_id = str(user_data['group_id'])+'_'+str(user_data['user_id'])
-            n = es.index(index=user_index,body=user_data,id = es_user_id)
-            logging.info(f'es Channel user added update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-        elif Event.user_left:
-            pair = {
-                'channel_id':chat_id,
-                'account_id':self.account['account_id'],
-            }
-            data = self.es_search(index=chat_index,filed=pair)
-            if data == None:
+            user_list = [user_data,]
+            channel_info = None
+            async for dialog in self.CLIENT.iter_dialogs():
+                if chat_id == self.Strip_Pre(dialog.id):
+                    channel_info = await self.Get_Channel_Info_By_Dialog(dialog)
+                    break
+            if channelinfo == None:
                 return
-            chat_data = data['_source']
-            es_id = data['_id']
-            now = datetime.now()
-            update_time = int(datetime.timestamp(now)*1000)
-            chat_data['updata_time'] = update_time
-            chat_data['participants_count'] = chat.participants_count
-            n = es.index(index=chat_index,body=chat_data,id = es_id)
-            logging.info(f'es Channel user left update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-        elif Event.new_title:
-            pair = {
-                'channel_id':chat_id,
-                'account_id':self.account['account_id'],
-            }
-            data = self.es_search(index=chat_index,filed=pair)
-            if data == None:
-                return
-            chat_data = data['_source']
-            es_id = data['_id']
-            now = datetime.now()
-            update_time = int(datetime.timestamp(now)*1000)
-            day_str = now.strftime("%y_%m_%d")
+            format_user = self.Format_Users(user_list,channel_info)
+            if self.DUMP_MODEL == "1":
+                self.Store_Users_In_Json_File(format_user)
+            self.Transfer_Users(format_user)
 
-            chat_data['updata_time'] = update_time
-            chat_data['channel_title'] = chat.title
-
-            n = es.index(index=chat_index,body=chat_data,id = es_id)
-            logging.info(f'es Channel title data update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-        else:
-            logging.info(f"Other chataction happened.")
-        pass
-
-    async def User_Updata(self,Event:events):
+    # 选择方法进行传输
+    def Transfer_Channel(self,Format_Channel:dict):
         """ 
-        处理 user 出现的更新消息
-        @param Event: 出现的事件
+        根据配置选项，对得到的 channel 信息进行传输
         """ 
-        if Event.online:
-            user_index = self.ES_USER_INDEX
-            pair = {
-                'user_id':Event.user_id,
-            }
-            data = self.es_search(Index=user_index,Filed=pair)
-            if data == None or Event.last_seen == None :
-                return 
-            es_id = data['_id']
-            user_data = data['_source']
-            last_time = int(datetime.timestamp(Event.last_seen)*1000)
-            user_data['last_date'] = last_time
-            now = datetime.now()
-            update_time = int(datetime.timestamp(now)*1000)
-            user_data['update_time'] = update_time
-            n = es.index(index=user_index,body=user_data,id = es_id)
-            logging.info(f'es user data update:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
+        if self.UPDATA_MODEL == '0':
+            # 没有传输目标
+            pass
+        elif self.UPDATA_MODEL == '1':
+            # ES 为传输目标
+            self.Channel_Es_Transfer(Format_Channel)
+        elif self.UPDATA_MODEL == '2':
+            # rabbitmq 为传输目标
+            self.Channel_Mq_Transfer(Format_Channel)
+        elif self.UPDATA_MODEL == '3':
+            # 自定义的传输目标
+            self.Channel_Custom_Transfer(Format_Channel)
         else:
+            # 其它情况，也可以认为是没有传输目标
+            pass
+
+    async def Transfer_Msg(self):
+        """ 
+        根据配置选项，定期对监听到的 msg 进行传输
+        """ 
+        if self.UPDATA_MODEL == '0':
+            # 没有传输目标
+            self.Msg_None_Transfer()
+        elif self.UPDATA_MODEL == '1':
+            # ES 为传输目标
+            self.Msg_Es_Transfer()
+        elif self.UPDATA_MODEL == '2':
+            # rabbitmq 为传输目标
+            self.Msg_Mq_Transfer()
+        elif self.UPDATA_MODEL == '3':
+            # 自定义的传输目标
+            self.Msg_Custom_Transfer()
+        else:
+            # 其它情况，也可以认为是没有传输目标
+            self.Msg_None_Transfer()
+
+    def Transfer_Users(self,Format_Users:list):
+        """ 
+        根据配置，进行相应的信息保存操作
+        @param Format_Users: 规范的 users 信息列表
+        """ 
+        if self.UPDATA_MODEL == '0':
+            # 没有传输目标
+            pass
+        elif self.UPDATA_MODEL == '1':
+            # ES 为传输目标
+            self.Users_Es_Transfer(Format_Users)
+        elif self.UPDATA_MODEL == '2':
+            # rabbitmq 为传输目标
+            self.Users_Mq_Transfer(Format_Users)
+        elif self.UPDATA_MODEL == '3':
+            # 自定义的传输目标
+            self.Users_Custom_Transfer(Format_Users)
+        else:
+            # 其它情况，也可以认为是没有传输目标
+            pass
+
+
+    # 此为不传输部分
+    def Msg_None_Transfer(self):
+        """
+        没有传输目标，所以需要清空
+        """ 
+        with self.LOCK_UPDATA_MSG:
+            self.UPDATA_MESSAGE = []
+
+
+    # 此为 ES 传输方法部分
+    def Es_Connect(self,Times:int):
+        """ 
+        根据配置连接上 Es 服务器（无密码版本）
+        最终返回建立好的连接或 none 值
+        @param Times: 尝试连接次数上限
+        @return: es 连接
+        """ 
+        es_connect = None
+        try:
+            if (self.ES_IP != '' and self.ES_PORT != ''):
+                address = f"http://{self.ES_IP}:{self.ES_PORT}"
+                es_connect = Elasticsearch([address])
+            else:
+                logging.error('You ip or port is None!!!!')
+        except ConnectionError as e:
+            logging.error(f'Received an error {e} \n Error raised by the HTTP connection!!! we will try againe.')
+            es_connect = self.Es_Rebuilt(Times,address)
+        except ConnectionTimeout as e:
+            logging.error(f'Received an error {e} \n Connection timed out during an operation!!! we will try againe.')
+            es_connect = self.Es_Rebuilt(Times,address)
+        except Exception as e:
+            logging.error(f"Received an error {e} exit!!")
+        return es_connect
+        
+    def Es_Rebuilt(self,Times:int,Address:str):
+        """ 
+        尝试重新建立 ES 连接
+        返回最终建立好的连接或 none 值
+        @param Times: 重试次数上限
+        @param Adress: es 地址
+        @return: es 连接
+        """  
+        es_connect = None
+        for i in range(0,Times):
+            logging.info(f'Attempting times:{i+1}......')
+            try:
+                es_connect = Elasticsearch([Address])
+                if es_connect :
+                    break
+                else:
+                    logging.error(f'The {i+1}th times Connection is Wrong!!!')
+            except Exception as e:
+                logging.error(f'The {i+1}th times Connection is Wrong!!!')
+        if es_connect == None:
+            logging.error('ES connection rebuilt is wrong!!!!!!!!!')
+        return es_connect
+
+    def Msg_Es_Transfer(self):
+        """
+        msg 的属性需要传输给 es 服务器上
+        """ 
+
+        es = self.ES_CONNECT
+        with self.LOCK_UPDATA_MSG:
+            messages_info = copy.deepcopy(self.UPDATA_MESSAGE)
+            self.UPDATA_MESSAGE = []
+
+        # 批量上传
+        if messages_info == []: 
             return
 
-    def Es_Search(self,Index,Filed):
-        """ 
-        从 es 中根据指定条件获取返回的结果列表
-        @param index: 需要查询的页
-        @param filed: 进行过滤的条件字段
-        @return: 返回查询到的结果列表
-        """ 
-        es = self.es_connect
-        body = {
-            "query":{
-                "bool":{
-                    "must":[]
-                }
+        # 检查 index
+        es_index = self.ES_MESSAGE_INDEX
+        if es_index == None :
+            logging.error('Es msg index is None!!!!! Fix it !!')
+            sys.exit(0)
+        if not es.indices.exists(index=es_index):
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index new_message_info')
+        actions = (
+            {
+                '_index': es_index,
+                '_type': '_doc',
+                '_id': str(Message['to_id'])+'_'+str(Message['id']),
+                '_source': Message,
             }
-        }
+            for Message in messages_info
+        )
+        n,_ = bulk(es, actions)
+        logging.info(f'es data: total:{len(messages_info)} message, insert {n} message successful')
 
-        for key,value in filed.items():
-            pattem = {
-                "term":{
-                    key:value
-                }
+    def Channel_Es_Transfer(self,Format_Channel:dict):
+        """ 
+        channel 的属性需要传输给 es 服务器上
+        @param Format_Channel: 规范的channel 属性
+        """ 
+
+        es = self.ES_CONNECT
+
+        # 检查 index
+        es_index = self.ES_CHANNEL_INDEX
+        if es_index == None :
+            logging.error('Es channel index is None!!!!! Fix it !!')
+            sys.exit(0)
+        if not es.indices.exists(index=es_index):
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index channel')
+
+        channel_id = self.Strip_Pre(Format_Channel['id'])
+        es_id = channel_id
+
+        # 将数据进行上传
+        n = es.index(index=es_index,doc_type='_doc',body=Format_Channel,id = es_id)
+        logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
+
+    def Users_Es_Transfer(self,Format_Users:list):
+        """ 
+        users 的属性需要传输给 es 服务器上
+        @param Format_Users: 规范的 users 列表
+        """ 
+
+        es = self.ES_CONNECT
+
+        # 检查 index
+        es_index = self.ES_USER_INDEX
+        if es_index == None :
+            logging.error('Es users index is None!!!!! Fix it !!')
+            sys.exit(0)
+        if not es.indices.exists(index=es_index):
+            result = es.indices.create(index=es_index)
+            logging.info ('creat index user')
+
+        actions = (
+            {
+                '_index': es_index,
+                '_id':str(User_info['channel']['id'])+'_'+str(User_info['id']),
+                '_source':User_info,
             }
-            body['query']['bool']['must'].append(pattem)
+            for User_info in Format_Users
+        )
+
+        # 将数据进行上传
+        n,_ = bulk(es, actions)
+        logging.info(f'total:{len(Format_Users)} user, insert {n} user successful')
+
+
+    # 此为 MQ 传输方法部分
+    def Mq_Connect(self,Env:dict):
+        """
+        采用 RabbitMQ 来进行传输
+        和 mq 建立连接，向指定 topic 发送消息
+        @param Env: 配置文件的参数
+        @return: 和 rabbitmq 的连接
+        """
+        username = Env['MQ_USERNAME']
+        password = Env['MQ_PASSWORD']
+        mq_ip = Env['MQ_IP']
         try:
-            full_data_list = es.search(index=index,body=body)
-            if full_data_list['hits']['total']['value'] < 1:
-                return None
-            data_list = full_data_list['hits']['hits']
-            return data_list
+            mq_port = Env['MQ_PORT']
+        except ValueError as e:
+            #print('MQ port is illegal, please check it!!!!')
+            logging.error('MQ port is illegal, please check it!!!!')
+            sys.exit(0)
         except Exception as e:
-            logging.error(f"Get an error during search es:{e}")
-            return None
+            #print('Error in type conversion of MQ port!!!!')
+            logging.error('Error in type conversion of MQ port!!!!')
+            sys.exit(0)
+        self.MQ_MSG_TOPIC = Env['MQ_MSG_TOPIC']
+        self.MQ_USERS_TOPIC = Env['MQ_USERS_TOPIC']
+        self.MQ_CHANNEL_TOPIC = Env['MQ_CHANNEL_TOPIC']
+        self.MQ_RELATION_TOPIC = Env['MQ_RELATION_TOPIC']
 
-    def es_get_index(self,index_name):
-        es = self.es_connect
+        user_info = pika.PlainCredentials(username,password)
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host = mq_ip,port = mq_port,credentials = user_info, heartbeat = 0))
+        mq_client = connection.channel()
 
-        # 检查 index 是否存在
-        if not es.indices.exists(index=index_name):
-            logging.error(f"Can't find {index_name} in es")
-            return None
+        mq_client.exchange_declare(exchange=self.MQ_MSG_TOPIC,exchange_type="topic", durable=True)
+        mq_client.exchange_declare(exchange=self.MQ_USERS_TOPIC,exchange_type="topic", durable=True)
+        mq_client.exchange_declare(exchange=self.MQ_CHANNEL_TOPIC,exchange_type="topic", durable=True)
+        mq_client.exchange_declare(exchange=self.MQ_RELATION_TOPIC,exchange_type="topic", durable=True)
 
-        data = []
+        return mq_client
 
-        # 获取目标数据属性
-        page = es.search(index=index_name,scroll="2m",size=100)
-        scroll_id = page['_scroll_id']
-        scroll_size = page['hits']['total']['value']
-    
-        while scroll_size > 0:
-            for source in page['hits']['hits']:
-                data.append(source)
-                scroll_size -= 1
-            page = es.scroll(scroll_id=scroll_id,scroll="2m")
-            scroll_id = page['_scroll_id']
-            scroll_size = len(page['hits']['hits'])
-        return data
+    def Rabbitmq_Single_Publish(self,Topic:str,Msg:bytes):
+        """ 
+        向 rabbitmq 指定的 topic 发送消息
+        @param Topic: mq 的 topic
+        @param Msg: 需要发送的消息
+        """
+        #print('Starint updata single msg')
+        self.MQ_CONNECT.basic_publish(
+            exchange=Topic,
+            routing_key="",
+            body=Msg,
+            mandatory=True,
+            properties=pika.BasicProperties(delivery_mode=2)
+        )
+        #print('end updata')
 
+    def Rabbitmq_Multi_Publish(self,Topic:str,Msg:list):
+        """ 
+        向 rabbitmq 指定的 topic 发送消息
+        @param Topic: mq 的 topic
+        @param Msg: 需要发送的消息
+        """
+        for i in Msg:
+            self.MQ_CONNECT.basic_publish(
+                exchange=Topic,
+                routing_key="",
+                body=i,
+                mandatory=True,
+                properties=pika.BasicProperties(delivery_mode=2)
+            )
+
+    def Msg_Mq_Transfer(self):
+        """
+        将 msg 的属性传给 mq
+        """ 
+        with self.LOCK_UPDATA_MSG:
+            messages_list = copy.deepcopy(self.UPDATA_MESSAGE)
+            self.UPDATA_MESSAGE = []
+
+        if messages_list == []:
+            return
+
+        mq_msg_list = []
+        for i in messages_list:
+            messagepb = telegram_pb2.MessagePb()
+            if i['id'] is not None:
+                messagepb.id = i['id']
+            if i['to_id'] is not None:
+                messagepb.to_id = int(i['to_id'])
+            if i['date'] is not None:
+                messagepb.date = str(i['date'])
+            if i['message'] is not None:
+                messagepb.message = i['message']
+            if i['from_id'] is not None:
+                messagepb.from_id = i['from_id']
+            if i['userName'] is not None:
+                messagepb.userName = i['userName']
+            if i['groupName'] is not None:
+                messagepb.groupName = i['groupName']
+            if i['groupAbout'] is not None:
+                messagepb.groupAbout = i['groupAbout']
+            # messagepb.to_id_type = i['to_id_type']
+            if i['fwd_from'] is not None:
+                mq_fwd_from = messagepb.fwd_from
+                if i['fwd_from']['date'] is not None:
+                    mq_fwd_from.date = str(i['fwd_from']['date'])
+                if i['fwd_from']['from_id'] is not None:
+                    mq_fwd_from.from_id = i['fwd_from']['from_id']
+                if i['fwd_from']['channel_id'] is not None:
+                    mq_fwd_from.channel_id = str(i['fwd_from']['channel_id'])
+            
+            if i['reply_to_msg_id'] is not None:
+                messagepb.reply_to_msg_id = str(i['reply_to_msg_id'])
+            if i['media'] is not None:
+                mq_media = messagepb.media
+                if i['media'] ['type'] is not None:
+                    mq_media.type = i['media']['type']
+                if i['media'] ['store'] is not None:
+                    mq_media.store = i['media']['store']
+                if i['media'] ['name'] is not None:
+                    mq_media.name = i['media']['name']
+                if i['media'] ['md5'] is not None:
+                    mq_media.md5 = i['media']['md5']
+                if i['media'] ['size'] is not None:
+                    mq_media.size = i['media']['size']
+
+            bin_mq_msg = messagepb.SerializeToString()
+            mq_msg_list.append(bin_mq_msg)
+        
+        self.Rabbitmq_Multi_Publish(self.MQ_MSG_TOPIC,mq_msg_list)
+        logging.info(f'Upload msg count{len(mq_msg_list)}')
+
+    def Channel_Mq_Transfer(self,Format_Channel:dict):
+        """
+        channel 的属性需要传输给 mq 服务器上
+        @param Format_Channel: 规范的channel 属性
+        """ 
+        mq_channel = telegram_pb2.ChannelPb()
+        if Format_Channel['id'] is not None:
+            mq_channel.id = int(Format_Channel['id'])
+        if Format_Channel['title'] is not None:
+            mq_channel.title = Format_Channel['title']
+        if Format_Channel['photo'] is not None:
+            mq_channel.photo = Format_Channel['photo']
+        if Format_Channel['megagroup'] is not None:
+            mq_channel.megagroup = Format_Channel['megagroup']
+        if Format_Channel['restricted'] is not None:
+            mq_channel.restricted = Format_Channel['restricted']
+        if Format_Channel['username'] is not None:
+            mq_channel.username = Format_Channel['username']
+        if Format_Channel['date'] is not None:
+            mq_channel.date = str(Format_Channel['date'])
+        if Format_Channel['about'] is not None:
+            mq_channel.about = Format_Channel['about']
+        if Format_Channel['participants_count'] is not None:
+            mq_channel.participants_count = Format_Channel['participants_count']
+
+        if Format_Channel['location'] is not None:
+            mq_location = mq_channel.location
+            if  Format_Channel['location']['address'] is not None:
+                mq_location =str(Format_Channel['location']['address'])
+        bin_mq_channel = mq_channel.SerializeToString()
+        self.Rabbitmq_Single_Publish(self.MQ_CHANNEL_TOPIC,bin_mq_channel)
+
+    def Users_Mq_Transfer(self,Format_Users:list):
+        """ 
+        users 的属性需要传输给 mq 服务器上
+        @param Format_Users: 规范的 users 列表
+        """ 
+        bin_mq_users_list = []
+
+        for i in Format_Users:
+            mq_user = telegram_pb2.UserPb()
+            if i['id'] is not None:
+                mq_user.id = i['id']
+            if i['is_self'] is not None:
+                mq_user.is_self = i['is_self']
+            if i['contact'] is not None:
+                mq_user.contact = i['contact']
+
+            if i['mutual_contact'] is not None:
+                mq_user.mutual_contact = i['mutual_contact']
+            if i['deleted'] is not None:
+                mq_user.deleted = i['deleted']
+            if i['bot'] is not None:
+                mq_user.bot = i['bot']
+            if i['bot_chat_history'] is not None:
+                mq_user.bot_chat_history = i['bot_chat_history']
+            if i['bot_nochats'] is not None:
+                mq_user.bot_nochats = i['bot_nochats']
+            if i['verified'] is not None:
+                mq_user.verified = i['verified']
+            if i['restricted'] is not None:
+                mq_user.restricted = i['restricted']
+            if i['date'] is not None:
+                mq_user.date = str(i['date'])
+            if i['about'] is not None:
+                mq_user.about = i['about']
+            if i['username'] is not None:
+                mq_user.username = i['username']
+            if i['phone'] is not None:
+                mq_user.phone = str(i['phone'])
+            if i['first_name'] is not None:
+                mq_user.first_name = i['first_name']
+            if i['last_name'] is not None:
+                mq_user.last_name = i['last_name']
+            if i['photo'] is not None:
+                mq_user.photo = i['photo']
+            if i['super'] is not None:
+                mq_user.super = i['super']
+
+            if i['channel'] is not None:
+                mq_user_channel = mq_user.channel
+                if i['channel']['id'] is not None:
+                    mq_user_channel.id = int(i['channel']['id'])
+                if i['channel']['title'] is not None:
+                    mq_user_channel.title = i['channel']['title']
+                if i['channel']['photo'] is not None:
+                    mq_user_channel.photo = i['channel']['photo']
+                if i['channel']['megagroup'] is not None:
+                    mq_user_channel.megagroup = i['channel']['megagroup']
+                if i['channel']['restricted'] is not None:
+                    mq_user_channel.restricted = i['channel']['restricted']
+                if i['channel']['username'] is not None:
+                    mq_user_channel.username = i['channel']['username']
+                if i['channel']['date'] is not None:
+                    mq_user_channel.date = str(i['channel']['date'])
+                if i['channel']['about'] is not None:
+                    mq_user_channel.about = i['channel']['about']
+                if i['channel']['participants_count'] is not None:
+                    mq_user_channel.participants_count = int(i['channel']['participants_count'])
+                if i['channel']['location'] is not None:
+                    mq_location = mq_user_channel.location
+                    if  i['channel']['location']['address'] is not None:
+                        mq_location = str(i['channel']['location']['address'])
+
+            bin_mq_user = mq_user.SerializeToString()
+            bin_mq_users_list.append(bin_mq_user)
+
+        self.Rabbitmq_Multi_Publish(self.MQ_USERS_TOPIC,bin_mq_users_list)
+
+    # 此部分为自定义部分，完善用户的自定义传输方法
+    def Custom_Connect(self,Env:dict):
+        """ 
+        用户自定的传输目标，需要用户自己去实现
+        """
+        pass
+
+    def Users_Custom_Transfer(self,Format_Users:dict):
+        """ 
+        需要用户自定义传输方法，默认采用 pass
+        @param Format_Users: 规范的 users 列表
+        """ 
+        pass
+
+    def Channel_Custom_Transfer(self,Format_Channel:dict):
+        """ 
+        需要用户自定义传输方法，默认采用 pass
+        @param Format_Channel: 规范的channel 属性
+        """ 
+        pass
+
+    def Msg_Custom_Transfer(self):
+        """
+        需要用户自定义传输方法，默认调用无目标的函数
+        """ 
+        self.Msg_None_Transfer()
+
+
+    # 以下均为实验性代码，能否有用，等待测试
     def add_channel(self,url:str)->bool:
         """
         通过链接加入群组（待测试）
@@ -1975,94 +2080,4 @@ class TGInformer:
             logging.error(f"Fail to quit channel for the error:{e}.")
             return False
 
-    def count_active_user(self,message_info):
-        """ 
-        统计活跃用户
-        """
-        with self.lock_active_user:
-
-            es_index = self.ES_ACTIVE_USER_INDEX
-            pair = {
-                'user_id':message_info['user_id'],
-                'group_id':message_info['group_id'],
-            }
-            data = self.es_search(index=es_index,filed=pair)
-
-            user_id = None
-            user_data = None
-
-            today_begin = begin_time(message_info['msg_date'])
-            now = datetime.now()
-            update_time = int (datetime.timestamp(now)*1000)
-
-            if data == None:
-                user_data = {
-                    'user_name':message_info['user_name'],
-                    'user_id':message_info['user_id'],
-                    'count':1,
-                    'day':today_begin,
-                    'channel_id':message_info['group_id'],
-                    'channel_title':message_info['group_name'],
-                    'updata_time':update_time,
-                }
-            # 获取当前日期的选项
-            else:
-                for i in range(len(data)):
-                    if data[i]['_source']['day'] == today_begin:
-                        user_data = data[i]['_source']
-                        user_id = data[i]['_id']
-                        break
-                if user_data == None:
-                    user_data = {
-                        'user_name':message_info['user_name'],
-                        'user_id':message_info['user_id'],
-                        'count':1,
-                        'day':today_begin,
-                        'channel_id':message_info['group_id'],
-                        'channel_title':message_info['group_name'],
-                        'updata_time':update_time,
-                    }
-                else:
-                    user_data['updata_time'] = update_time
-                    user_data['count'] += 1
-                
-
-            if user_id == None:
-                n = es.index(index=es_index,body=user_data)
-                logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-            else:
-                n = es.index(index=es_index,body=user_data,id = user_id)
-                logging.info(f'es data:{json.dumps(n,ensure_ascii=False,indent=4)} , {n}')
-
-    async def dialog_count_admin(self)->dict:
-        """ 
-        统计各个群组中的管理员
-        """ 
-        user_index = self.ES_USER_INDEX
-        user_list = self.es_get_index(user_index)
-        dialog_index = self.ES_CHANNEL_INDEX
-        dialog_list = self.es_get_index(dialog_index)
-        if (user_list == None or dialog_list == None):
-            return None
-        count_info = {}
-        for i in user_list:
-            info = i['_source']
-            if info['super']:
-                if info['group_id'] in count_info:
-                    count_info[info['group_id']].append({
-                        'user_name':info['user_name'],
-                        'first_name':info['first_name'],
-                        'last_name':info['last_name'],
-                        'is_bot':info['is_bot'],
-                    })
-                else:
-                    count_info[info['group_id']] = [{
-                        'user_name':info['user_name'],
-                        'first_name':info['first_name'],
-                        'last_name':info['last_name'],
-                        'is_bot':info['is_bot'],
-                    }]
-        now = datetime.now()
-        count_info['update']=int(now.timestamp()*1000)
-        return count_info
 

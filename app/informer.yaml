@@ -65,6 +65,14 @@ ES_MEDIO_INDEX: null
 # Custom config
 # ---------------
 # 需要根据用户自己的需求自己定义字段
-
+# 添加了采用 rabbitmq 的方法传输数据
+MQ_USERNAME: ''
+MQ_PASSWORD: ''
+MQ_IP: ''
+MQ_PORT: ''
+MQ_MSG_TOPIC: ''
+MQ_USERS_TOPIC: ''
+MQ_CHANNEL_TOPIC: ''
+MQ_RELATION_TOPIC: ''
 
 
