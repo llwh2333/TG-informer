@@ -17,7 +17,7 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.custom.dialog import Dialog
 from telethon import TelegramClient, events,functions
-from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin
+from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
@@ -97,6 +97,7 @@ class TGInformer:
         self.ADMINS_DATA = None                             # es 用户页中的管理员数据
         self.DUMP_MODEL = env['INFO_DUMP_LOCAL']            # 是否存储到本地中
         self.SKIP_FIRST = env['SKIP_FIRST_UPDATA']          # 启动时是否跳过加载用户
+        self.FORMAT_CHANNEL = []                            # 当前加载的所有channel
 
         # 连接
         self.CLIENT = None                                  # tg 客户端实例
@@ -122,6 +123,8 @@ class TGInformer:
         self.LOCK_UPDATA_MSG = threading.Lock()             # es 消息累积存储异步锁
         self.LOCK_CHANNEL_ADD = threading.Lock()            # 等待添加更新频道异步锁
         self.LOCK_ACTIVE_USER = threading.Lock()            # 更新用户活跃信息异步锁
+
+        self.LOCK_FORMAT_CHANNEL = threading.Lock()         # 缓存channel 信息
 
         # 线程池
         self.LOOP = asyncio.get_event_loop()
@@ -576,7 +579,7 @@ class TGInformer:
         for eng_text in eng_split_texts:
             result = re.match(email_pattern, eng_text, flags=0)
             if result:
-                emails.append(result.str)
+                emails.append(result.string)
         if emails == []:
             return None
         return emails
@@ -982,6 +985,8 @@ class TGInformer:
                     groupabout = i['channel about']
                     break
 
+        await self.Upload_User_Msg(Event)
+
         msg_info = {
             'message_id':Event.message.id,   
             'message_text':msg_content,   
@@ -1003,6 +1008,96 @@ class TGInformer:
             'account':self.ACCOUNT['account_id']
         }
         return msg_info
+
+    async def Upload_User_Msg(self,Event:events):
+        """
+        将消息发送者的基本属性上传
+        """
+        sender_id = Event.sender_id
+        message_obj = Event.message
+        try:
+            ENTITY = await self.CLIENT.get_entity(sender_id)
+        except Exception as e:
+            logging.error(f"Get the msg user error:{e},text:{Event.raw_text}")
+            return
+
+        if isinstance(ENTITY,User):
+            # user 类型
+            user_entity = ENTITY
+
+            user_photo = r'./picture/user/'+str(user_entity.id)+'.jpg'
+            try:
+                if os.path.exists(user_photo):
+                    real_photo_path = user_photo
+                else:
+                    real_photo_path =  await self.CLIENT.download_profile_photo(user_entity,file=user_photo)
+            except Exception as e:
+                logging.error(f"User photo get an error:{e}.")
+
+            now = datetime.now()
+            update_time = now
+            user_date = user_date = int(datetime.timestamp(update_time)*1000)
+
+            channel_id = None
+            if isinstance(message_obj.to_id, PeerChannel):
+                channel_id = Event.message.to_id.channel_id
+            elif isinstance(message_obj.to_id, PeerChat):
+                channel_id = Event.message.to_id.chat_id
+            if channel_id == None:
+                logging.error(f'Fail to get msg user id')
+                return
+            channel_id = self.Strip_Pre(channel_id)
+            user_channel = None
+            for i in self.FORMAT_CHANNEL:
+                if i['id'] == channel_id:
+                    user_channel = i
+                    break
+                    
+            user_about = None
+            full_user = None
+            user_super = False
+            try:
+                full = await self.CLIENT(GetFullUserRequest(user_entity))
+                full_user = full.full_user
+            except Exception as e:
+                logging.error(f'Fail to get the full user:{e}')
+            if full_user is not None:
+                user_about = full_user.about
+                try:
+                    if isinstance(full_user.bot_broadcast_admin_rights,ChannelParticipantAdmin):
+                        user_super = True
+                except Exception as e:
+                    logging.error(f'Fail to detect user admin:{e}')
+                    
+            user_data = {
+                'id':user_entity.id,
+                'is_self':user_entity.is_self,
+                'contact':user_entity.contact,
+                'mutual_contact':user_entity.mutual_contact,
+                'deleted':user_entity.deleted,
+                'bot':user_entity.bot,
+                'bot_chat_history':user_entity.bot_chat_history,
+                'bot_nochats':user_entity.bot_nochats,
+                'verified':user_entity.verified,
+                'restricted':user_entity.restricted ,
+                'username' :user_entity.username,
+                'phone':user_entity.phone,
+                'first_name' :user_entity.first_name,
+                'last_name':user_entity.last_name ,
+                'photo':real_photo_path,
+                'date':user_date,
+                'update_time':user_date,
+                'channel':user_channel,
+                'super':user_super,
+                'about':user_about ,
+            }
+            logging.info(f'Succesful get msg user{user_data["first_name"]}')
+            users_data = [user_data,]
+            if self.DUMP_MODEL == '1':
+                self.Store_Users_In_Json_File(users_data)
+            self.Transfer_Users(users_data)
+        else:
+            logging.info(f'text:{Event.raw_text};/n the peer type is{type(ENTITY)}')
 
     def Filter_Msg(self,Msg_Info:dict)->bool:
         """ 
@@ -1294,6 +1389,14 @@ class TGInformer:
         """ 
 
         format_channel = self.Format_Channel(Channel_Info)
+        add_format = format_channel
+        with self.LOCK_FORMAT_CHANNEL:
+            for i in self.FORMAT_CHANNEL:
+                if i['id'] == add_format['id']:
+                    add_format = None
+                    break
+            if add_format is not None:
+                self.FORMAT_CHANNEL.append(add_format)
 
         if self.DUMP_MODEL == '1':
             self.Store_Channel_In_Json_File(format_channel)
@@ -1480,7 +1583,7 @@ class TGInformer:
                 'username' :user_info['user_name'],
                 'phone':user_info['user_phone'],
                 'first_name' :user_info['first_name'] ,
-                'last_name':user_info['first_name'] ,
+                'last_name':user_info['last_name'] ,
                 'photo':user_info['user_photo'] ,
                 'channel':format_channel,
                 'super':user_info['super'] ,
