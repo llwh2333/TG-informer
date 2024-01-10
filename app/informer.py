@@ -8,6 +8,7 @@ import gspread
 import logging
 import sqlalchemy as db
 from datetime import datetime, timedelta
+import time
 from random import randrange
 from telethon import utils
 from sqlalchemy.orm import sessionmaker
@@ -17,7 +18,7 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.custom.dialog import Dialog
 from telethon import TelegramClient, events,functions
-from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User
+from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User,Channel,Chat
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
@@ -41,6 +42,7 @@ import copy
 import queue
 import telegram_pb2
 import pika
+from pika.exceptions import ConnectionClosed,ChannelClosed,ChannelWrongStateError
 
 """ 
 监控程序主要部分
@@ -56,8 +58,8 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '2.0.2'
-update_time = '2023.12.07'
+version = '2.1.0'
+update_time = '2024.01.10'
 
 logFilename = './tgout.log'
 
@@ -89,15 +91,18 @@ class TGInformer:
         self.UPDATA_MODEL = env['INFO_UPDATA_TYPE']
 
         # 数据部分
+        self.ENV = env
         self.CHANNEL_META = []                              # 已加入 channel 的信息
         self.CHANNEL_ADD= set()                             # 新检测到，待上传的 channel
         self.UPDATA_MESSAGE = []                            # 等待上传的 message
         self.DIALOG_MESSAGE_BOT = {}                        # 用于过滤 BOT 消息
+        self.DIALOG_USER = {}
         self.ACTIVE_USER = {}                               # 统计活跃用户
         self.ADMINS_DATA = None                             # es 用户页中的管理员数据
         self.DUMP_MODEL = env['INFO_DUMP_LOCAL']            # 是否存储到本地中
         self.SKIP_FIRST = env['SKIP_FIRST_UPDATA']          # 启动时是否跳过加载用户
         self.FORMAT_CHANNEL = []                            # 当前加载的所有channel
+
 
         # 连接
         self.CLIENT = None                                  # tg 客户端实例
@@ -123,6 +128,7 @@ class TGInformer:
         self.LOCK_UPDATA_MSG = threading.Lock()             # es 消息累积存储异步锁
         self.LOCK_CHANNEL_ADD = threading.Lock()            # 等待添加更新频道异步锁
         self.LOCK_ACTIVE_USER = threading.Lock()            # 更新用户活跃信息异步锁
+        self.LOCK_FILTER_USER = threading.Lock()            # 用户最近上传列表
 
         self.LOCK_FORMAT_CHANNEL = threading.Lock()         # 缓存channel 信息
 
@@ -230,55 +236,70 @@ class TGInformer:
             if not dialog.is_user:
                 channel_id = dialog.id 
                 channel_id = self.Strip_Pre(channel_id)
-                # 线程安全的加入会话信息
-                with self.LOCK_CHANNEL_ADD:
-                    for i in self.CHANNEL_META:
-                        if i['channel id'] == channel_id :
-                            channel_id = None
-                            break
-                    # 若当前会话并不在列表中
-                    if channel_id != None:
-                        # 获取会话的完整信息
-                        try:
-                            if dialog.is_channel:
-                                channel_full = await self.CLIENT(GetFullChannelRequest(dialog.input_entity))
-                            elif dialog.is_group:
-                                channel_full = self.CLIENT(GetFullChatRequest(chat_id=dialog.id))
-                        except ChannelPrivateError as e:
-                            logging.error(f'The channel is private,we can\'t get channel full info: {dialog.id}')
-                        except Exception as e:
-                            logging.error(f"Fail to get the full entity:{dialog.id}")
+                for i in self.CHANNEL_META:
+                    if i['channel id'] == channel_id :
+                        channel_id = None
+                        break
 
-                        # 将 channel 加入现在可监控的 channel 列表
-                        about = None
-                        try :
-                            about = channel_full.full_chat.about
-                        except AttributeError as e:
-                            logging.error(f'Chat has no attribute full_chat')
-                        except Exception as e:
-                            logging.error(f"Get an error: {e}")
-                        self.CHANNEL_META.append({
+                # 若当前会话并不在列表中
+                if channel_id != None:
+                    logging.info(f'Find a new channel:{dialog.name} : {dialog.id}')
+                    # 获取会话的完整信息
+                    try:
+                        if dialog.is_channel:
+                            channel_full = await self.CLIENT(GetFullChannelRequest(dialog.input_entity))
+                        else:
+                            channel_full = self.CLIENT(GetFullChatRequest(chat_id=dialog.id))
+                    except ChannelPrivateError as e:
+                        logging.error(f'The channel is private,we can\'t get channel full info: {dialog.id}')
+                    except Exception as e:
+                        logging.error(f"Fail to get the full entity:{dialog.id}")
+                    # 将 channel 加入现在可监控的 channel 列表
+                    about = None
+                    try :
+                        about = channel_full.full_chat.about
+                    except AttributeError as e:
+                        logging.error(f'Chat has no attribute full_chat')
+                    except Exception as e:
+                        logging.error(f"Get an error: {e}")
+                    self.CHANNEL_META.append({
                             'channel id':self.Strip_Pre(dialog.id),
                             'channel name':dialog.name,
                             'channel about': about,
                             })
 
-                    # 从添加列表中除移
                     id_name = self.Strip_Pre(dialog.id)
                     if not id_name in self.DIALOG_MESSAGE_BOT:
                         self.DIALOG_MESSAGE_BOT[id_name] = queue.Queue(10)
-                    if id_name in self.CHANNEL_ADD:
-                        self.CHANNEL_ADD.discard(id_name)
+                    if not id_name in self.DIALOG_USER:
+                        self.DIALOG_USER[id_name] = queue.Queue(20)
+                    logging.info(f'channel:{dialog.name}:{id_name} has add.')
 
-                e = await self.Get_Channel_Info_By_Dialog(dialog)
-                await self.Dump_Channel_Info(e)
+                    e = await self.Get_Channel_Info_By_Dialog(dialog)
+                    await self.Dump_Channel_Info(e)
 
                 # 用户的更新不再进行这种批量更新
-                await self.Dump_Channel_User_Info(dialog,e)
+                #await self.Dump_Channel_User_Info(dialog,e)
                 count +=1
         
         logging.info(f'########## Channel Count:{count}')
         logging.info(f'########## {sys._getframe().f_code.co_name}: Monitoring channel: {json.dumps(self.CHANNEL_META,ensure_ascii=False,indent=4)}')
+
+    def Path_fix(self,Original_Path:str):
+        """
+        修复对图片的文件路径问题
+        param Original_Path: 修改前的路径
+        return: 修改后的路径
+        """
+        if Original_Path == None:
+            return None
+        fix_path = Original_Path
+        pre_str = "./data/"
+        if pre_str in Original_Path:
+            index = Original_Path.index(pre_str) + 7  # 找到 "./" 的位置并加上长度 2 来获取开始提取的索引
+            extracted_string = Original_Path[index:]  # 提取从索引开始的字符串
+            fix_path = 'tg/' + extracted_string
+        return fix_path
 
     def Strip_Pre(self,Text:str|int)->str:
         """ 
@@ -302,15 +323,15 @@ class TGInformer:
         logging.info('Init the monitor to channels')
 
         # 检测本地图片路径是否存在
-        userpicture_path = r'./picture/user'
-        channelpicture_path = r'./picture/channel'
-        if not os.path.exists(userpicture_path):
-            os.makedirs(userpicture_path)
-            logging.info(f'Create the picture dir:{userpicture_path}')
-        if not os.path.exists(channelpicture_path):
-            os.makedirs(channelpicture_path)
-            logging.info(f'Create the picture dir:{channelpicture_path}')
-        photo_path = r'./picture/dialog'
+        user_picture_path = r'./data/picture/user'
+        channel_picture_path = r'./data/picture/channel'
+        if not os.path.exists(user_picture_path):
+            os.makedirs(user_picture_path)
+            logging.info(f'Create the picture dir:{user_picture_path}')
+        if not os.path.exists(channel_picture_path):
+            os.makedirs(channel_picture_path)
+            logging.info(f'Create the picture dir:{channel_picture_path}')
+        photo_path = r'./data/picture/dialog'
         if not os.path.exists(photo_path):
             os.makedirs(photo_path)
             logging.info(f'Create the picture dir:{photo_path}')
@@ -373,7 +394,8 @@ class TGInformer:
                 id_name = self.Strip_Pre(dialog.id)
                 if not id_name in self.DIALOG_MESSAGE_BOT:
                     self.DIALOG_MESSAGE_BOT[id_name] = queue.Queue(10)
-
+                if not id_name in self.DIALOG_USER:
+                    self.DIALOG_USER[id_name] = queue.Queue(20)
                 # 上传群组信息
                 await self.Dump_Channel_Info(e)
                 await self.Dump_Channel_User_Info(dialog,e)
@@ -397,7 +419,8 @@ class TGInformer:
                 id_name = self.Strip_Pre(dialog.id)
                 if not id_name in self.DIALOG_MESSAGE_BOT:
                     self.DIALOG_MESSAGE_BOT[id_name] = queue.Queue(10)
-
+                if not id_name in self.DIALOG_USER:
+                    self.DIALOG_USER[id_name] = queue.Queue(20)
                 # 上传群组信息
                 await self.Dump_Channel_Info(e)
 
@@ -418,6 +441,7 @@ class TGInformer:
 
         # 过滤，检测当前的 msg 是否需要存储
         if self.Filter_Msg(msg_info):
+            logging.info(f'the msg has filter{msg_info["message_text"]}')
             return 
 
         # 存储 msg 属性
@@ -713,6 +737,7 @@ class TGInformer:
                 file_store = file_path+'/' + file_name
                 file_size = os.path.getsize(file_store)
                 file_md5 = self.File_Md5(file_store)
+                file_store = self.Path_fix(file_store)
                 media = {
                     'type':'.jpg',                              # 目前只存储图片
                     'store':file_store,
@@ -757,7 +782,7 @@ class TGInformer:
         @param Event: 新消息事件
         @return: 图片将要存储的文件夹路径
         """
-        file_path = './picture/dialog'
+        file_path = './data/picture/dialog'
         if isinstance(Event.message.to_id, PeerChannel):
             channel_id = Event.message.to_id.channel_id
         elif isinstance(Event.message.to_id, PeerChat):
@@ -970,14 +995,29 @@ class TGInformer:
                 groupname = i['channel name']
                 groupabout = i['channel about']
                 break
+
+
         # 若遍历完仍旧没有找到
         if groupname == None:
-            logging.info (f'New channel :########{strip_channel_id}####################')
+            logging.info (f'txt:({msg_content}) New channel : #################### {channel_id} #################### ')
             with self.LOCK_CHANNEL_ADD:
                 if strip_channel_id not in self.CHANNEL_ADD:
-                    self.CHANNEL_ADD.add(strip_channel_id)
-                    logging.info(f'The channel is adding:{[i for i in self.CHANNEL_ADD]}')
-            await self.Channel_Flush()
+                    if not self.Check_id_meta(strip_channel_id):
+                        self.CHANNEL_ADD.add(strip_channel_id)
+                        logging.info(f'The channel is adding:{[i for i in self.CHANNEL_ADD]}')
+                
+            await self.Msg_Get_Channel(channel_id)
+
+            times  =  0
+            while (times < 20):
+                times += 1
+                if strip_channel_id in self.CHANNEL_ADD:
+                    logging.info(f'channel:{strip_channel_id} is adding')
+                    time.sleep(1)
+                else:
+                    logging.info(f'channel:{strip_channel_id} not in adding list')
+                    break
+
             for i in self.CHANNEL_META:
                 test_channel_id = self.Strip_Pre(i['channel id'])
                 if  test_channel_id == strip_channel_id:
@@ -985,8 +1025,39 @@ class TGInformer:
                     groupabout = i['channel about']
                     break
 
-        await self.Upload_User_Msg(Event)
+            if groupname == None:
+                logging.info(f'get channel{strip_channel_id} from msg ({msg_content}) fail!!!')
 
+
+        if channel_id in self.DIALOG_USER:
+            with self.LOCK_FILTER_USER:
+                user_queue = self.DIALOG_USER[channel_id]
+                queue_len = user_queue.qsize()
+                flag = False
+                if user_queue.empty():
+                    user_queue.put(chat_user_id)
+                else:
+                    for i in range(queue_len):
+                        item = user_queue.get()
+                        if item == chat_user_id:
+                            flag = True
+                        else:
+                            user_queue.put(item)
+                    if not flag:
+                        if user_queue.full():
+                            item = user_queue.get()
+                            user_queue.put(chat_user_id)
+                        else :
+                            try:
+                                user_queue.put(chat_user_id)
+                            except Exception as e:
+                                logging.error(f"Get an error({e})")
+            if not flag:
+                logging.info(f'msg txt ({msg_content}) find new user')
+                await self.Upload_User_Msg(Event)
+        else:
+            logging.info(f'msg txt ({msg_content}) find new user')
+            await self.Upload_User_Msg(Event)
         msg_info = {
             'message_id':Event.message.id,   
             'message_text':msg_content,   
@@ -1007,7 +1078,165 @@ class TGInformer:
             'Ana_tag':Ana_Result,
             'account':self.ACCOUNT['account_id']
         }
+        logging.info(f'updata msg ({msg_content}) successful!!!!!!!!')
         return msg_info
+
+    async def Msg_Get_Channel(self,Channel_Id:str):
+        """
+        在消息中检测到了新的群组
+        """
+        ENTITY = None
+        try:
+            ENTITY = await self.CLIENT.get_entity((int(Channel_Id)))
+        except Exception as e:
+            logging.error(f"id({Channel_Id}) chat entity get error{e}")
+        if not ENTITY:
+            try:
+                ENTITY = await self.CLIENT.get_entity(PeerChannel(int(Channel_Id)))
+            except Exception as e:
+                logging.error(f"id({Channel_Id}) channel entity get error{e}")
+        
+        if not ENTITY:
+            try:
+                ENTITY = await self.CLIENT.get_entity(PeerChat(int(Channel_Id)))
+            except Exception as e:
+                logging.error(f"id({Channel_Id}) chat entity get error{e}")
+
+        if not ENTITY:
+            return
+        
+
+        username = None
+        invite_link = None
+        about = None
+        is_megagroup = False
+        is_group = False
+        is_channel = False
+        participants_count = None
+        real_photo_path = None
+        full_chat = None
+        is_enable = False
+        location = None
+        is_restricted = False
+        admins_count = 0
+        now = datetime.now()
+        update_time = now
+
+        if isinstance(ENTITY,Channel):
+            print('msg get an entity')
+            print(ENTITY)
+            if ENTITY.broadcast:
+                is_channel = True
+            if ENTITY.megagroup:
+                is_megagroup = True
+                is_group = True
+            if ENTITY.restricted:
+                is_restricted = True
+            if ENTITY.username is not None:
+                username = ENTITY.username
+                invite_link = f"https://t.me/{username}"
+            participants_count = ENTITY.participants_count
+
+            photo_path = r'./data/picture/channel/'+str(Channel_Id)+'.jpg'
+            Input_peer = await self.CLIENT.get_input_entity(ENTITY)
+            try:
+                real_photo_path = await self.CLIENT.download_profile_photo(Input_peer,file=photo_path)
+                real_photo_path = self.Path_fix(real_photo_path)
+            except Exception as e:
+                logging.error(f"Download photo get an error: {e}")
+            full_chat
+            try:
+                channel_full = await self.CLIENT(GetFullChannelRequest(Input_peer))
+                full_chat = channel_full.full_chat
+                logging.info(f'full channel:{ENTITY.title}')
+            except Exception as e:
+                logging.error(f"Get full channel error:({e})")
+
+            if full_chat is not None:
+                about = full_chat.about
+                admins_count = full_chat.admins_count
+                if full_chat.location != None :
+                    location = full_chat.location.address
+            pass
+        elif isinstance(ENTITY,Chat):
+            print('msg get an entity')
+            print(ENTITY)
+            is_group = True
+            is_channel = False
+            is_megagroup = False
+            participants_count = ENTITY.participants_count
+            is_enable = ENTITY.deactivated
+
+            photo_path = r'./data/picture/channel/'+str(Channel_Id)+'.jpg'
+            Input_peer = self.CLIENT.get_input_entity(ENTITY)
+            try:
+                real_photo_path = await self.CLIENT.download_profile_photo(Input_peer,file=photo_path)
+                real_photo_path = self.Path_fix(real_photo_path)
+            except Exception as e:
+                logging.error(f"Download photo get an error: {e}")
+
+            try:
+                channel_full =  self.CLIENT(GetFullChatRequest(Input_peer))
+                full_chat = channel_full.full_chat
+                logging.info(f'full chat:{ENTITY.title}')
+            except Exception as e:
+                logging.error(f"Get full chat error:({e})")
+
+            if full_chat is not None:
+                about = full_chat.about
+        else:
+            logging.info(f"Get a type({type(ENTITY)})")
+            print(ENTITY)
+            return
+        with self.LOCK_CHANNEL_ADD:
+            self.CHANNEL_META.append({
+                'channel id': self.Strip_Pre(Channel_Id),
+                'channel name': ENTITY.title,
+                'channel about': about,
+                })
+            self.CHANNEL_ADD.discard(self.Strip_Pre(Channel_Id))
+
+
+        logging.info(f"Add channel meta({ENTITY.title}) successful")
+        channel_data = {
+            'channel_id':Channel_Id,            # -100类型
+            'channel_title':ENTITY.title,
+            'channel_date':ENTITY.date,        # 原本想设置为频道创建时间，但没有办法做到，后续看看如何做到
+            'invite_link':invite_link,
+            'account_id':self.ACCOUNT['account_id'],
+            'last_msg_date':ENTITY.date,      # 最新消息发送时间
+            'channel_about':about,
+            'is_megagroup':is_megagroup,
+            'is_group':is_group,
+            'is_channel':is_channel,
+            'participants_count':participants_count,
+            'channel_photo':real_photo_path,
+            'username':username,
+            'is_enable':is_enable,
+            'location':location,
+            'is_restricted':is_restricted,
+            'admins_count':admins_count,
+            'update_time':update_time           # 更新时间
+        }
+
+        id_name = self.Strip_Pre(Channel_Id)
+        if not id_name in self.DIALOG_MESSAGE_BOT:
+            self.DIALOG_MESSAGE_BOT[id_name] = queue.Queue(10)
+        if not id_name in self.DIALOG_USER:
+            self.DIALOG_USER[id_name] = queue.Queue(20)
+        await self.Dump_Channel_Info(channel_data)
+
+
+
+    def Check_id_meta(self,Channel_Id):
+        """
+        检查输入的去除前缀 id 是否已经存在与 meta 变量中
+        """
+        for i in self.CHANNEL_META:
+            test_channel_id = self.Strip_Pre(i['channel id'])
+            if  test_channel_id == Channel_Id:
+                return True
+        return False
 
     async def Upload_User_Msg(self,Event:events):
         """
@@ -1025,7 +1254,8 @@ class TGInformer:
             # user 类型
             user_entity = ENTITY
 
-            user_photo = r'./picture/user/'+str(user_entity.id)+'.jpg'
+            user_photo = r'./data/picture/user/'+str(user_entity.id)+'.jpg'
+            real_photo_path = None
             try:
                 if os.path.exists(user_photo):
                     real_photo_path = user_photo
@@ -1033,7 +1263,7 @@ class TGInformer:
                     real_photo_path =  await self.CLIENT.download_profile_photo(user_entity,file=user_photo)
             except Exception as e:
                 logging.error(f"User photo get an error:{e}.")
-
+            real_photo_path = self.Path_fix(real_photo_path)
             now = datetime.now()
             update_time = now
             user_date = user_date = int(datetime.timestamp(update_time)*1000)
@@ -1288,11 +1518,19 @@ class TGInformer:
         channel_full = None
         try:
             if Dialog.is_channel:
-                channel_full = await self.CLIENT(GetFullChannelRequest(Dialog.input_entity))
-                logging.info(f'full channel:{Dialog.title}')
+                try:
+                    channel_full = await self.CLIENT(GetFullChannelRequest(Dialog.input_entity))
+                    logging.info(f'full channel:{Dialog.title}')
+                except Exception as e:
+                    logging.error(f"get a error ({Dialog.title}):{e},try to get full chat.")
+                    channel_full = await self.CLIENT(GetFullChatRequest(chat_id=Dialog.id))
             elif Dialog.is_group:
-                channel_full = await self.CLIENT(GetFullChatRequest(chat_id=Dialog.id))
-                logging.info(f'full chat:{Dialog.title}')
+                try:
+                    channel_full = await self.CLIENT(GetFullChatRequest(chat_id=Dialog.id))
+                    logging.info(f'full chat:{Dialog.title}')
+                except Exception as e:
+                    logging.error(f"get a error ({Dialog.title}):{e},try to get full channel.")
+                    channel_full = await self.CLIENT(GetFullChannelRequest(Dialog.input_entity))
             if hasattr(channel_full,'full_chat'):
                 full_chat = channel_full.full_chat
             else:
@@ -1300,7 +1538,7 @@ class TGInformer:
         except ChannelPrivateError as e:
             logging.error(f'the channel is private,we can\'t get channel full info: {Dialog.id}')
         except Exception as e:
-            logging.error(f"get a error :{e}")
+            logging.error(f"get a error ({Dialog.title}):{e}")
 
 
         if full_chat is not None:
@@ -1321,7 +1559,7 @@ class TGInformer:
 
         # 频道图片获取
         real_photo_path = None
-        photo_path = r'./picture/channel/'+str(Dialog.id)+'.jpg'
+        photo_path = r'./data/picture/channel/'+str(Dialog.id)+'.jpg'
         if os.path.exists(photo_path):
             real_photo_path = photo_path
         else:
@@ -1329,7 +1567,7 @@ class TGInformer:
                 real_photo_path = await self.CLIENT.download_profile_photo(Dialog.input_entity,file=photo_path)
             except Exception as e:
                 logging.error(f"Get an error: {e}")
-        
+        real_photo_path = self.Path_fix(real_photo_path)
         # channel 其它属性
         last_msg_date = Dialog.date
         now = datetime.now()
@@ -1496,7 +1734,7 @@ class TGInformer:
             if  isinstance(user.participant,ChannelParticipant):
                 last_date = user.participant.date
             modified = None
-            photo_path = r'./picture/user/'+str(user_id)+'.jpg'
+            photo_path = r'./data/picture/user/'+str(user_id)+'.jpg'
             real_photo_path = None
             try:
                 if os.path.exists(photo_path):
@@ -1505,6 +1743,8 @@ class TGInformer:
                     real_photo_path =  await self.CLIENT.download_profile_photo(user,file=photo_path)
             except Exception as e:
                 logging.error(f"User photo get an error:{e}.")
+            real_photo_path = self.Path_fix(real_photo_path)
+
             is_deleted = user.deleted
             group_id = Dialog.id
             group_name = Dialog.title
@@ -1617,12 +1857,14 @@ class TGInformer:
             now = datetime.now()
             update_time = int(datetime.timestamp(now)*1000)
             real_photo_path = None
-            photo_path = f"./picture/user/{str(user.id)}.jpg"
+            photo_path = f"./data/picture/user/{str(user.id)}.jpg"
             user_input = Event.get_input_user()
             try :
                 real_photo_path = await self.CLIENT.download_profile_photo(user_input,file=photo_path)
             except Exception as e:
                 logging.error(f"Fail to get user photo")
+            real_photo_path = self.Path_fix(real_photo_path)
+
             if isinstance(user.participant,ChannelParticipantAdmin):
                 is_super = True
             else:
@@ -1912,7 +2154,7 @@ class TGInformer:
         self.MQ_RELATION_TOPIC = Env['MQ_RELATION_TOPIC']
 
         user_info = pika.PlainCredentials(username,password)
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host = mq_ip,port = mq_port,credentials = user_info, heartbeat = 0))
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host = mq_ip,port = mq_port,credentials = user_info, heartbeat=0))
         mq_client = connection.channel()
 
         mq_client.exchange_declare(exchange=self.MQ_MSG_TOPIC,exchange_type="topic", durable=True)
@@ -1929,13 +2171,25 @@ class TGInformer:
         @param Msg: 需要发送的消息
         """
         #print('Starint updata single msg')
-        self.MQ_CONNECT.basic_publish(
-            exchange=Topic,
-            routing_key="",
-            body=Msg,
-            mandatory=True,
-            properties=pika.BasicProperties(delivery_mode=2)
-        )
+        times = 100
+        while times > 0:
+            try:
+                self.MQ_CONNECT.basic_publish(
+                    exchange=Topic,
+                    routing_key="",
+                    body=Msg,
+                    mandatory=True,
+                    properties=pika.BasicProperties(delivery_mode=2)
+                )
+                if times != 100:
+                    logging.info ("Fixing rabbitmq connection Successfully")
+                return
+            except (ConnectionClosed, ChannelClosed, ChannelwrongstateError) as e:
+                logging.error("Rabbitmq connection error!!!")
+                logging.error('We try to reconnect.')
+                self.Rabbitmq_Reconnect()
+                times -= 1
+        logging.error(f"Error about has happened {e}")
         #print('end updata')
 
     def Rabbitmq_Multi_Publish(self,Topic:str,Msg:list):
@@ -1945,13 +2199,16 @@ class TGInformer:
         @param Msg: 需要发送的消息
         """
         for i in Msg:
-            self.MQ_CONNECT.basic_publish(
-                exchange=Topic,
-                routing_key="",
-                body=i,
-                mandatory=True,
-                properties=pika.BasicProperties(delivery_mode=2)
-            )
+            self.Rabbitmq_Single_Publish(Topic,i)
+
+    def Rabbitmq_Reconnect(self):
+        """
+        重新连接 rabbitmq
+        """
+        logging.info("Fixing the rabbitmq connection.")
+        self.Mq_Connect(self.ENV)
+        time.sleep(10)
+        
 
     def Msg_Mq_Transfer(self):
         """

@@ -1,0 +1,102 @@
+syntax = "proto3";
+package telegram.base;
+option java_package = "com.wanfang.proto.im";
+
+// 群组结构
+message ChannelPb {
+    int64 id = 1; //群组 id
+    string title = 2; //群组名
+    string photo = 3; //群头像存储的位置
+    bool megagroup = 4; //True超级群组
+    bool restricted = 5; //True被封禁
+    string username = 6; //群组个性化id
+    string date = 7; //加入的时间，也就是第一次发现的时间
+    string about = 8; //群简介
+    int32 participants_count = 9; //群人数
+    Account account = 10; //关联的账号信息
+    Location location = 20; //地理信息
+
+}
+message Location {
+    string address = 1;
+    float long = 2;
+    float lat = 3;
+}
+
+message Account {
+    string phone = 3;
+}
+
+//im 用户结构数据
+message UserPb {
+    int64 id = 1; //用户id
+    bool is_self = 2; //是不是自己
+    bool contact = 3; //是否是联系人
+    bool mutual_contact = 4; //有没有联系过
+    bool deleted = 5; //是否删除
+    bool bot = 6; // 是否是机器人
+    bool bot_chat_history = 7; //是否与该机械人有过聊天记录
+    bool bot_nochats = 8; //有没有聊过天
+    bool verified = 9; //有没有验证
+    bool restricted = 10; //True 被禁言
+    string date = 11; //加入的时间，也就是第一次发现的时间
+    string about = 12; //用户简介
+    string username = 14; //个性名，可用于查找用户
+    string phone = 15; //电话号码
+    string first_name = 16; //名
+    string last_name = 17; //姓
+    string photo = 18; //头像
+
+    ChannelPb channel = 13; //群组
+    bool super = 19; //超级用户
+}
+
+// 群组以及用户的结构
+message ChannelJoinUserPb {
+    int64 cid = 1; //群组id
+    int64 uid = 2; //用户id
+    string date = 3; //加入时间
+    string title = 4; // 群名
+    string username = 5; // 群username
+    bool super = 6; //是否超级用户
+
+}
+
+//Telegram 消息数据格式
+message MessagePb {
+    int64 id = 1; //消息的id
+    int64 to_id = 2; //消息接收者id
+    bool to_id_type = 3; //消息接收者类型,True:表示群，false：表示：频道
+    string date = 4; //消息发送的时间
+    string message = 5; //发送的消息
+    int64 from_id = 6; //消息发送者id
+    MessageFwdFromPb fwd_from = 7; //消息是否转发过该对象不为nil 说明被转发过
+    string reply_to_msg_id = 8; //被回复的消息 被回复的消息 被回复的消息 id
+
+    MediaPb media = 9; //消息的媒体（图片，动视频等）
+
+    string userName = 10; //用户名
+    string groupName = 11; //群组名
+    string groupAbout = 12; //群简介
+}
+
+
+message MessageFwdFromPb {
+    string date = 1; //转发时间
+    int64 from_id = 2; //被转发消息送者 被转发消息送者 被转发消息送者 被转发消息送者 id,并且是 并且是 User
+    string channel_id = 3; //被转发送者 被转发送者 被转发送者 id,并且是 并且是 Channel
+}
+
+message MediaPb {
+    string type = 1; //媒体类型，（.jpg等）
+    string store = 2; //存储的路径
+    //文件名
+    string name = 3;
+    // 文件md5
+    string md5 = 4;
+    //文件大小
+    int64 size = 5;
+    //文件id
+    string file_id = 6;
+}
+

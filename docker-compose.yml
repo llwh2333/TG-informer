@@ -7,8 +7,6 @@ services:
   # Informer Service
   # ================
   app_informer:
-    env_file:
-      - informer.env
     build: .
     container_name: app_informer
     volumes:
