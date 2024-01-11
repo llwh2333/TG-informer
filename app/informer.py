@@ -58,8 +58,8 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '2.1.0'
-update_time = '2024.01.10'
+version = '2.1.1'
+update_time = '2024.01.11'
 
 logFilename = './tgout.log'
 
@@ -1334,9 +1334,6 @@ class TGInformer:
         过滤无效的 msg 消息，如：bot 发送的广告（短时间内大量相同内容）
         @return: 是否为无效 msg
         """ 
-        # 去除非机器人消息
-        if not Msg_Info['is_bot']:
-            return False
         channel_id = self.Strip_Pre(Msg_Info['group_id'])
         if not channel_id in self.DIALOG_MESSAGE_BOT:
             logging.error(f"Not found dialog({Msg_Info['group_name']}) in message cache")
