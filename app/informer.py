@@ -18,7 +18,7 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.custom.dialog import Dialog
 from telethon import TelegramClient, events,functions
-from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User,Channel,Chat
+from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User,Channel,Chat,InputGeoPoint
 from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
@@ -43,6 +43,8 @@ import queue
 import telegram_pb2
 import pika
 from pika.exceptions import ConnectionClosed,ChannelClosed,ChannelWrongStateError
+from geopy.geocoders import GeoNames
+import random
 
 """ 
 监控程序主要部分
@@ -59,7 +61,7 @@ ___________                               __
 ---------------------------------------------------------
 """
 version = '2.1.1'
-update_time = '2024.01.11'
+update_time = '2024.02.28'
 
 logFilename = './tgout.log'
 
@@ -468,6 +470,212 @@ class TGInformer:
         }
         return result
 
+    async def Nearly_Geo_User(self):
+        """
+        获取附近的人，通过文件中指定的经纬度
+        """
+
+        # 检查经纬度文件是否存在
+        if not os.path.exists("./Geo_Point.json"):
+            logging.error("Not found Geo_Point.json file!!!!!")
+            return
+        
+        with open("./Geo_Point.json") as f:
+            geo_data = json.load(f)
+        
+        # 使用 Nominatim API
+        geolocator = GeoNames(username='tttyyythename')
+
+        while True:
+            for key in geo_data.keys():
+                value = geo_data[key]
+                area = self.Detect_Geo(value,geolocator)
+                await self.Geo_Get_Users(value,area)
+                value = self.Rand_distance(value)
+                while (value is not None):
+                    time.sleep(int(value['time'] * 60))
+                    area = self.Detect_Geo(value,geolocator)
+                    await self.Geo_Get_Users(value,area)
+                    value = self.Rand_distance(value)
+
+    def Detect_Geo(self,geolocator,Geo:dict)->str:
+        """ 
+        识别给定经纬度的对应的实际城市
+        @param Geo: 给定的经纬度信息
+        @return: 识别的结果
+        """
+        latitude = Geo['latitude']
+        longitude = Geo['longitude']
+        area = ''
+
+        try:           
+            location = geolocator.reverse(latitude+','+longitude,lang='zh-CN')
+        except :
+            
+            return area
+        
+        if location is not None:
+            str_location = str(location)
+            area = str_location
+            print(f'type:{type(str_location)};content:{str_location}')
+        return area
+        
+
+
+
+
+    def Rand_distance(self,Geo:dict)->dict:
+        """
+        随机的移动经纬度坐标
+        """
+
+        num1 = (int(random.random()*10000))/1000
+        lat_distance = num1 * 0.01 
+        signed = random.randint(-1,1)
+        num2 = (int(random.random()*10000))/1000
+        long_distance = num2 * 0.009
+        # 5~25 min
+        time = int(random.random()*100 )/5 + 5
+
+        geo_move = {
+            'lat_distance':lat_distance,
+            'long_distance':long_distance,
+            'time' : time 
+        }
+
+        latitude = Geo['latitude'] + signed*geo_move['lat_distance']
+        longitude = Geo['longitude'] + geo_move['long_distance']
+
+        # 修正纬度（-90~+90）
+        if latitude > 90 :
+            return None
+        elif latitude < -90:
+            return None
+
+        # 修正经度（-180~+180）
+        if longitude > 180:
+            longitude = longitude - 360
+
+        # 环球一圈即可停止
+        end_begin = Geo['beginlongitude'] - 1
+        if end_begin < -180:
+            end_begin = -180
+        if longitude < Geo['beginlongitude'] and longitude > end_begin:
+            return None
+        
+        Geo['latitude'] = latitude
+        Geo['longitude'] = longitude
+        Geo['time'] = geo_move['time']
+
+        return Geo
+
+    async def Geo_Get_Users(self,Geo:dict,area:str):
+        """
+        根据给予的经纬度数据搜索附近的人
+        @param geo: 给予的经纬度信息
+        @param tag: 对于给定的经纬度的现实城市位置信息
+        """
+        latitude = Geo['latitude']
+        longitude = Geo['longitude']
+        geo_info = InputGeoPoint(
+            lat=float(latitude),
+            long=float(longitude),
+            accuracy_radius=42)
+        
+        result = await self.CLIENT(functions.contacts.GetLocatedRequest(geo_point=geo_info))
+        users_result = result.updates[0].peers
+        
+        location = {
+            'latitude':latitude,
+            'longitude':longitude,
+            'area':area,
+            'distance':0,
+        }
+        #print(len(users_result))
+        for user in users_result:
+            location['distance'] = 0
+            user_id = 0
+            ENTITY = None
+            try :
+                if hasattr(user,'peer'):
+                    user_id = user.peer.user_id
+                if hasattr(user,"distance"):
+                    location['distance'] = user.distance
+                if user_id != 0:
+                    ENTITY = await self.CLIENT.get_entity(user_id)
+            except Exception as e:
+                logging.error(f"The Geo:latitude({latitude}),longitude({longitude}) get error({e}).")
+
+            if ENTITY is None:
+                logging.error(f"Fail to get user")
+                continue
+            # 提取 user 信息
+
+            user_entity = ENTITY
+ 
+            user_photo = r'./data/picture/user/'+str(user_entity.id)+'.jpg'
+            real_photo_path = None
+            try:
+                if os.path.exists(user_photo):
+                    real_photo_path = user_photo
+                else:
+                    real_photo_path =  await self.CLIENT.download_profile_photo(user_entity,file=user_photo)
+            except Exception as e:
+                logging.error(f"User photo get an error:{e}.")
+            real_photo_path = self.Path_fix(real_photo_path)
+            now = datetime.now()
+            update_time = now
+            user_date = user_date = int(datetime.timestamp(update_time)*1000)
+
+            user_channel = None
+                    
+            user_about = None
+            full_user = None
+            user_super = False
+            try:
+                full = await self.CLIENT(GetFullUserRequest(user_entity))
+                full_user = full.full_user
+            except Exception as e:
+                logging.error(f'Fail to get the full user:{e}')
+            if full_user is not None:
+                user_about = full_user.about
+                try:
+                    if isinstance(full_user.bot_broadcast_admin_rights,ChannelParticipantAdmin):
+                        user_super = True
+                except Exception as e:
+                    logging.error(f'Fail to detect user admin:{e}')
+                    
+            user_data = {
+                'id':user_entity.id,
+                'is_self':user_entity.is_self,
+                'contact':user_entity.contact,
+                'mutual_contact':user_entity.mutual_contact,
+                'deleted':user_entity.deleted,
+                'bot':user_entity.bot,
+                'bot_chat_history':user_entity.bot_chat_history,
+                'bot_nochats':user_entity.bot_nochats,
+                'verified':user_entity.verified,
+                'restricted':user_entity.restricted ,
+                'username' :user_entity.username,
+                'phone':user_entity.phone,
+                'first_name' :user_entity.first_name,
+                'last_name':user_entity.last_name ,
+                'photo':real_photo_path,
+                'date':user_date,
+                'update_time':user_date,
+                'channel':user_channel,
+                'super':user_super,
+                'about':user_about ,
+                'location':location,
+            }
+            logging.info(f'Succesful get msg user{user_data["first_name"]}')
+            users_data = [user_data,]
+            if self.DUMP_MODEL == '1':
+                self.Store_Users_In_Json_File(users_data)
+            self.Transfer_Users(users_data)
+
+
+ 
     # MSG 处理部分
     def Tag_Msg(self,Text:str):
         """ 
@@ -2181,7 +2389,7 @@ class TGInformer:
                 if times != 100:
                     logging.info ("Fixing rabbitmq connection Successfully")
                 return
-            except (ConnectionClosed, ChannelClosed, ChannelwrongstateError) as e:
+            except (ConnectionClosed, ChannelClosed, ChannelWrongStateError) as e:
                 logging.error("Rabbitmq connection error!!!")
                 logging.error('We try to reconnect.')
                 self.Rabbitmq_Reconnect()
