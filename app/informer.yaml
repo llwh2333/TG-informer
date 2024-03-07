@@ -44,6 +44,9 @@ VIRTU_NEAR_USER: '0'
 # 采用的是 geoname ，需要输入注册的 username
 GEONAME_USERNAME: ''
 
+# 是否快速搜索文件中指定位置的附近用户
+# 0 否；1 是
+GEO_FAST: '0'
 
 # ---------------
 # ES config

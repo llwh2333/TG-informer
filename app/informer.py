@@ -60,7 +60,7 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '2.2.0'
+version = '2.2.1'
 update_time = '2024.03.06'
 
 logFilename = './tgout.log'
@@ -499,27 +499,30 @@ class TGInformer:
                 value = geo_data[key]
                 area = self.Detect_Geo(Geo=value,geolocator=geolocator)
                 await self.Geo_Get_Users(value,area)
+                if self.ENV['GEO_FAST']:
+                    fasttime = int(360*random.random())
+                    logging.info(f"Fast geo detect , will sleep {fasttime}s")
+                    time.sleep(fasttime)
+                    continue
                 value = self.Rand_distance(value)
-                logging.info(f"Geo sleep :{int(value['time'] * 60)}s({value['time']}min)")
-                time.sleep(int(value['time'] * 60))
                 while (value is not None):
-                    
                     area = self.Detect_Geo(Geo=value,geolocator=geolocator)
 
                     # 识别不到地理信息，一般表示经纬度是在海洋上，跳过识别
                     if (area != ''):
-                        await self.Geo_Get_Users(value,area)
-                    value = self.Rand_distance(value)
-                    if (area != ''):
                         logging.info(f"Geo sleep :{value['time']}min")
                         time.sleep(int(value['time'] * 60))
+                        await self.Geo_Get_Users(value,area)
                     else:
                         logging.info(f"Geo Ocean sleep :{1}min")
                         time.sleep(60)
+                    
+                    value = self.Rand_distance(value)
                 RandFloat = random.random()
-                daytime = int(RandFloat*86,400)
+                daytime = int(RandFloat*86400)
                 logging.info(f"Geo detect around the world, will sleep {daytime}s({RandFloat} day)")
-                time.sleep(time)
+                time.sleep(daytime)
+                #time.sleep(int(360*RandFloat))
 
     def Detect_Geo(self,geolocator,Geo:dict)->str:
         """ 
