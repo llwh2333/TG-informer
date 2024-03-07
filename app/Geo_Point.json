@@ -4,6 +4,36 @@
         "latitude":"42.6511674",
         "longitude":"-73.754968",
         "beginlongitude":"-73.754968"
+    },
+    "location2":{
+        "begin":"香港",
+        "latitude":"22.326273",
+        "longitude":"114.019102",
+        "beginlongitude":"114.019102"
+    },
+    "location3":{
+        "begin":"澳门",
+        "latitude":"22.137384",
+        "longitude":":113.572788",
+        "beginlongitude":":113.572788"
+    },
+    "location4":{
+        "begin":"广州",
+        "latitude":"23.13639",
+        "longitude":"113.275916",
+        "beginlongitude":"113.275916"
+    },
+    "location5":{
+        "begin":"深圳",
+        "latitude":"22.543378",
+        "longitude":"114.060119",
+        "beginlongitude":"114.060119"
+    },
+    "location6":{
+        "begin":"佛山",
+        "latitude":"23.027608",
+        "longitude":"113.12306",
+        "beginlongitude":"113.12306"
     }
 }
 

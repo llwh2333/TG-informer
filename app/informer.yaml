@@ -36,6 +36,13 @@ INFO_UPDATA_TYPE: '1'
 # 1 跳过；0 不跳过
 SKIP_FIRST_UPDATA: '0'
 
+# 是否开启虚拟定位，搜索周围的人
+# 0 关闭；1 开启
+VIRTU_NEAR_USER: '0'
+
+# 虚拟定位反向解析位置信息参数
+# 采用的是 geoname ，需要输入注册的 username
+GEONAME_USERNAME: ''
 
 
 # ---------------

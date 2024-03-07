@@ -60,8 +60,8 @@ ___________                               __
           \/                                 /_____/  
 ---------------------------------------------------------
 """
-version = '2.1.1'
-update_time = '2024.02.28'
+version = '2.2.0'
+update_time = '2024.03.06'
 
 logFilename = './tgout.log'
 
@@ -104,6 +104,8 @@ class TGInformer:
         self.DUMP_MODEL = env['INFO_DUMP_LOCAL']            # 是否存储到本地中
         self.SKIP_FIRST = env['SKIP_FIRST_UPDATA']          # 启动时是否跳过加载用户
         self.FORMAT_CHANNEL = []                            # 当前加载的所有channel
+        self.VIRTU_NEAR_USERS = env['VIRTU_NEAR_USER']      # 是否启动虚拟定位搜索附近的人
+        self.GEONAME_USERNAME = env['GEONAME_USERNAME']     # geoname 的 username
 
 
         # 连接
@@ -373,6 +375,10 @@ class TGInformer:
             # 通过协程存储当前的新 msg
             await self.Msg_Handler(event)
 
+        # 虚拟定位获取附近的人
+        if self.VIRTU_NEAR_USERS == '1':
+            await self.Nearly_Geo_User()
+
         # 每隔 10s 上传一次 message
         while True:
             await self.Transfer_Msg()
@@ -480,23 +486,40 @@ class TGInformer:
             logging.error("Not found Geo_Point.json file!!!!!")
             return
         
+        logging.info("Begin to get nearly users")
+
         with open("./Geo_Point.json") as f:
             geo_data = json.load(f)
         
-        # 使用 Nominatim API
-        geolocator = GeoNames(username='tttyyythename')
+        # 使用 GeoName API
+        geolocator = GeoNames(username=self.GEONAME_USERNAME)
 
         while True:
             for key in geo_data.keys():
                 value = geo_data[key]
-                area = self.Detect_Geo(value,geolocator)
+                area = self.Detect_Geo(Geo=value,geolocator=geolocator)
                 await self.Geo_Get_Users(value,area)
                 value = self.Rand_distance(value)
+                logging.info(f"Geo sleep :{int(value['time'] * 60)}s({value['time']}min)")
+                time.sleep(int(value['time'] * 60))
                 while (value is not None):
-                    time.sleep(int(value['time'] * 60))
-                    area = self.Detect_Geo(value,geolocator)
-                    await self.Geo_Get_Users(value,area)
+                    
+                    area = self.Detect_Geo(Geo=value,geolocator=geolocator)
+
+                    # 识别不到地理信息，一般表示经纬度是在海洋上，跳过识别
+                    if (area != ''):
+                        await self.Geo_Get_Users(value,area)
                     value = self.Rand_distance(value)
+                    if (area != ''):
+                        logging.info(f"Geo sleep :{value['time']}min")
+                        time.sleep(int(value['time'] * 60))
+                    else:
+                        logging.info(f"Geo Ocean sleep :{1}min")
+                        time.sleep(60)
+                RandFloat = random.random()
+                daytime = int(RandFloat*86,400)
+                logging.info(f"Geo detect around the world, will sleep {daytime}s({RandFloat} day)")
+                time.sleep(time)
 
     def Detect_Geo(self,geolocator,Geo:dict)->str:
         """ 
@@ -520,14 +543,13 @@ class TGInformer:
             print(f'type:{type(str_location)};content:{str_location}')
         return area
         
-
-
-
-
     def Rand_distance(self,Geo:dict)->dict:
         """
         随机的移动经纬度坐标
         """
+
+        if self.ENV['ENV'] == 'test':
+            return None
 
         num1 = (int(random.random()*10000))/1000
         lat_distance = num1 * 0.01 
@@ -543,8 +565,8 @@ class TGInformer:
             'time' : time 
         }
 
-        latitude = Geo['latitude'] + signed*geo_move['lat_distance']
-        longitude = Geo['longitude'] + geo_move['long_distance']
+        latitude = float(Geo['latitude']) + signed * geo_move['lat_distance']
+        longitude = float(Geo['longitude']) + geo_move['long_distance']
 
         # 修正纬度（-90~+90）
         if latitude > 90 :
@@ -557,16 +579,16 @@ class TGInformer:
             longitude = longitude - 360
 
         # 环球一圈即可停止
-        end_begin = Geo['beginlongitude'] - 1
+        end_begin = float(Geo['beginlongitude']) - 1
         if end_begin < -180:
             end_begin = -180
-        if longitude < Geo['beginlongitude'] and longitude > end_begin:
+        if longitude < float(Geo['beginlongitude']) and longitude > end_begin:
             return None
         
-        Geo['latitude'] = latitude
-        Geo['longitude'] = longitude
+        Geo['latitude'] = '%.7f'%latitude
+        Geo['longitude'] = '%.6f'%longitude
         Geo['time'] = geo_move['time']
-
+        logging.info(f"Geo after move ({Geo})")
         return Geo
 
     async def Geo_Get_Users(self,Geo:dict,area:str):
@@ -575,16 +597,22 @@ class TGInformer:
         @param geo: 给予的经纬度信息
         @param tag: 对于给定的经纬度的现实城市位置信息
         """
+        logging.info(f'begin geo:({Geo["latitude"]},{Geo["longitude"]}),area({area})')
         latitude = Geo['latitude']
         longitude = Geo['longitude']
         geo_info = InputGeoPoint(
             lat=float(latitude),
             long=float(longitude),
             accuracy_radius=42)
-        
-        result = await self.CLIENT(functions.contacts.GetLocatedRequest(geo_point=geo_info))
-        users_result = result.updates[0].peers
-        
+        try:
+            result = await self.CLIENT(functions.contacts.GetLocatedRequest(geo_point=geo_info))
+        except Exception as e:
+            logging.error(f"Get an error about get near users:({e})")
+            return
+        if len(result.updates) > 0:
+            users_result = result.updates[0].peers
+        else:
+            return    
         location = {
             'latitude':latitude,
             'longitude':longitude,
@@ -592,6 +620,7 @@ class TGInformer:
             'distance':0,
         }
         #print(len(users_result))
+        logging.info("Begin get geo users")
         for user in users_result:
             location['distance'] = 0
             user_id = 0
@@ -604,6 +633,7 @@ class TGInformer:
                 if user_id != 0:
                     ENTITY = await self.CLIENT.get_entity(user_id)
             except Exception as e:
+                continue
                 logging.error(f"The Geo:latitude({latitude}),longitude({longitude}) get error({e}).")
 
             if ENTITY is None:
@@ -644,7 +674,7 @@ class TGInformer:
                         user_super = True
                 except Exception as e:
                     logging.error(f'Fail to detect user admin:{e}')
-                    
+            logging.info(f"Successfully get geo user({user_entity.first_name} {user_entity.last_name})")
             user_data = {
                 'id':user_entity.id,
                 'is_self':user_entity.is_self,
@@ -668,14 +698,12 @@ class TGInformer:
                 'about':user_about ,
                 'location':location,
             }
-            logging.info(f'Succesful get msg user{user_data["first_name"]}')
+            print(user_data)
             users_data = [user_data,]
-            if self.DUMP_MODEL == '1':
-                self.Store_Users_In_Json_File(users_data)
             self.Transfer_Users(users_data)
 
 
- 
+
     # MSG 处理部分
     def Tag_Msg(self,Text:str):
         """ 
@@ -1528,6 +1556,7 @@ class TGInformer:
                 'channel':user_channel,
                 'super':user_super,
                 'about':user_about ,
+                'location':None
             }
             logging.info(f'Succesful get msg user{user_data["first_name"]}')
             users_data = [user_data,]
@@ -1991,6 +2020,7 @@ class TGInformer:
                 'user_about':user_about,
                 'super':super,
                 'update':update_time,
+                'location':None
             }
             users_info_list.append(user_info)
         logging.info(f'Logging the users account {len(users_info_list)} ... \n')
@@ -2005,8 +2035,10 @@ class TGInformer:
         """ 
         if Users_Info == []:
             return None
-
-        format_channel = self.Format_Channel(Channel_Info)
+        if Channel_Info is not None:
+            format_channel = self.Format_Channel(Channel_Info)
+        else :
+            format_channel = None
         
         format_users = []
         for user_info in Users_Info:
@@ -2033,6 +2065,7 @@ class TGInformer:
                 'channel':format_channel,
                 'super':user_info['super'] ,
                 'update_time':update_time,
+                'location':user_info['location'],
             }
             format_users.append(user)
         return format_users
@@ -2518,7 +2551,7 @@ class TGInformer:
         for i in Format_Users:
             mq_user = telegram_pb2.UserPb()
             if i['id'] is not None:
-                mq_user.id = i['id']
+                mq_user.id = int(i['id'])
             if i['is_self'] is not None:
                 mq_user.is_self = i['is_self']
             if i['contact'] is not None:
@@ -2579,6 +2612,14 @@ class TGInformer:
                     mq_location = mq_user_channel.location
                     if  i['channel']['location']['address'] is not None:
                         mq_location = str(i['channel']['location']['address'])
+
+            if i['location'] is not None:
+                mq_user_location = mq_user.location
+                mq_user_location.distance = i['location']['distance']
+                mq_user_location.long = float(i['location']['longitude'])
+                mq_user_location.lat = float(i['location']['latitude'])
+                mq_user_location.area = i['location']['area']
+
 
             bin_mq_user = mq_user.SerializeToString()
             bin_mq_users_list.append(bin_mq_user)
