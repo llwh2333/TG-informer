@@ -1,0 +1,92 @@
+ENV: 'local'
+
+# ---------------
+# Telegram config
+# ---------------
+####### 此处的 api 采用的是该账号的 api
+# api 的 id
+TELEGRAM_API_APP_ID: ''
+
+# 获取 api 时候一起获得的 hash
+TELEGRAM_API_HASH: ''
+
+####### tg 账号的一些基本信息
+# tg 账号的 id
+TELEGRAM_ACCOUNT_ID: ''
+
+# 用于监控账号的电话号码
+TELEGRAM_ACCOUNT_PHONE_NUMBER: '+'
+
+# 账号的用户名
+TELEGRAM_ACCOUNT_USER_NAME: '@'
+
+# 账号的名称
+TELEGRAM_ACCOUNT_FIRST_NAME: ''
+TELEGRAM_ACCOUNT_LAST_NAME: ''
+
+# 是否将采集的信息存储到本地（json）格式
+# 1 存储；0 不存储
+INFO_DUMP_LOCAL: '1'
+
+# 采集数据传输方式
+# 0 不传输；1 es 传输；2 自定义
+INFO_UPDATA_TYPE: '1'
+
+# 是否跳过初次遍历成员
+# 1 跳过；0 不跳过
+SKIP_FIRST_UPDATA: '0'
+
+# 是否开启虚拟定位，搜索周围的人
+# 0 关闭；1 开启
+VIRTU_NEAR_USER: '0'
+
+# 虚拟定位反向解析位置信息参数
+# 采用的是 geoname ，需要输入注册的 username
+GEONAME_USERNAME: ''
+
+# 快速便利虚拟定位坐标
+# 0 不采用快速；1 采用快速
+GEO_FAST: '0'
+
+# 虚拟定位方案
+# 1 搜索国内文件坐标；2 搜索国外文件坐标；3 搜索所有坐标文件
+GEO_TYPE: '1'
+
+# ---------------
+# ES config
+# ---------------
+# 当上面的采集数据传输采用 es 传输时需要填写
+ES_IP: ''
+ES_PORT: ''
+
+# 必须
+ES_MESSAGE_INDEX: ''
+# 必须
+ES_CHANNEL_INDEX: ''
+# 必须
+ES_USER_INDEX: ''
+# 必须
+ES_ACTIVE_USER_INDEX: ''
+
+# 预计将会增加
+ES_ACCOUNT_INDEX: null
+ES_MEDIO_INDEX: null
+
+
+
+
+# ---------------
+# Custom config
+# ---------------
+# 需要根据用户自己的需求自己定义字段
+# 添加了采用 rabbitmq 的方法传输数据
+MQ_USERNAME: ''
+MQ_PASSWORD: ''
+MQ_IP: ''
+MQ_PORT: ''
+MQ_MSG_TOPIC: ''
+MQ_USERS_TOPIC: ''
+MQ_CHANNEL_TOPIC: ''
+MQ_RELATION_TOPIC: ''
+
+

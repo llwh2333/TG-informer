@@ -3,62 +3,16 @@ version: '3.5'
 #docker >= 17.12
 
 services: 
-
   # ================
-  # Database Service
+  # Informer Service
   # ================
-  db_informer: 
-    env_file:
-      - informer.env
-    container_name: db_informer
-    image: mysql:5.7
+  app_informer:
+    build: .
+    container_name: app_informer
     volumes:
-     - db_data:/var/lib/mysql
-     - ./my.cnf:/etc/mysql/my.cnf
-    ports:
-     - "3307:3306"
-
-
-
-  # ===============
-  # Logging service
-  # ===============
-  app_dozzle:
-    container_name: dozzle
-    image: amir20/dozzle:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - 9999:8080
+      - ./app/:/usr/local/app
+    stdin_open: true
+    tty: true
 
 volumes:
-  db_data: {}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  app: {}

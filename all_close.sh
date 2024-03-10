@@ -1,6 +1,5 @@
 #!/bin/bash
-
-./close_docker.sh
-
-
-./clean_docker.sh
+# 关闭
+docker-compose down
+# 清理
+docker volume prune && docker container prune
