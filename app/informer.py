@@ -19,7 +19,7 @@ from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.custom.dialog import Dialog
 from telethon import TelegramClient, events,functions
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel,ChannelParticipant,ChannelParticipantAdmin,User,Channel,Chat,InputGeoPoint
-from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError
+from telethon.errors.rpcerrorlist import FloodWaitError, ChannelPrivateError, UserAlreadyParticipantError,UpdateDeleteChannelMessages
 from telethon.tl.functions.channels import  JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest,ExportChatInviteRequest
 from oauth2client.service_account import ServiceAccountCredentials
@@ -2168,7 +2168,7 @@ class TGInformer:
                 if chat_id == self.Strip_Pre(dialog.id):
                     channel_info = await self.Get_Channel_Info_By_Dialog(dialog)
                     break
-            if channelinfo == None:
+            if channel_info == None:
                 return
             format_user = self.Format_Users(user_list,channel_info)
             if self.DUMP_MODEL == "1":
