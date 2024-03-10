@@ -517,8 +517,8 @@ class TGInformer:
                 area = self.Detect_Geo(Geo=value,geolocator=geolocator)
                 await self.Geo_Get_Users(value,area)
                 # 快速搜索
-                if self.ENV['GEO_FAST']:
-                    fasttime = int(360*random.random())
+                if self.ENV['GEO_FAST'] == '1':
+                    fasttime = int(3600*random.random())
                     logging.info(f"Fast geo detect , will sleep {fasttime}s")
                     time.sleep(fasttime)
                     continue
