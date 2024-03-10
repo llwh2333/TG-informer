@@ -44,6 +44,7 @@ import telegram_pb2
 import pika
 from pika.exceptions import ConnectionClosed,ChannelClosed,ChannelWrongStateError
 from geopy.geocoders import GeoNames
+from geopy.distance import geodesic
 import random
 
 """ 
@@ -488,8 +489,20 @@ class TGInformer:
         
         logging.info("Begin to get nearly users")
 
-        with open("./Geo_Point.json") as f:
-            geo_data = json.load(f)
+        # 搜索国内坐标
+        if self.ENV['GEO_TYPE'] == '1':
+            with open("./Domestic_Geo_Point.json",encoding='utf-8') as f:
+                geo_data = json.load(f)
+        # 搜索国外坐标
+        elif self.ENV['GEO_TYPE'] == '2':
+            with open("./Overseas_Geo_Point.json",encoding='utf-8') as f:
+                geo_data = json.load(f)
+        # 搜索所有坐标
+        elif self.ENV['GEO_TYPE'] == '3':
+            with open("./Geo_Point.json",encoding='utf-8') as f:
+                geo_data = json.load(f)
+        else:
+            return None
         
         # 使用 GeoName API
         geolocator = GeoNames(username=self.GEONAME_USERNAME)
@@ -497,8 +510,13 @@ class TGInformer:
         while True:
             for key in geo_data.keys():
                 value = geo_data[key]
+                value['change_latitude'] = 0
+                value['change_longitude'] = 0
+                value['move_latitude'] = value['latitude']
+                value['move_longitude'] = value['longitude']
                 area = self.Detect_Geo(Geo=value,geolocator=geolocator)
                 await self.Geo_Get_Users(value,area)
+                # 快速搜索
                 if self.ENV['GEO_FAST']:
                     fasttime = int(360*random.random())
                     logging.info(f"Fast geo detect , will sleep {fasttime}s")
@@ -519,8 +537,8 @@ class TGInformer:
                     
                     value = self.Rand_distance(value)
                 RandFloat = random.random()
-                daytime = int(RandFloat*86400)
-                logging.info(f"Geo detect around the world, will sleep {daytime}s({RandFloat} day)")
+                daytime = int(RandFloat*5*3600)
+                logging.info(f"Geo detect area finish, will sleep {daytime}s({RandFloat*5}hours)")
                 time.sleep(daytime)
                 #time.sleep(int(360*RandFloat))
 
@@ -530,8 +548,8 @@ class TGInformer:
         @param Geo: 给定的经纬度信息
         @return: 识别的结果
         """
-        latitude = Geo['latitude']
-        longitude = Geo['longitude']
+        latitude = Geo['move_latitude']
+        longitude = Geo['move_longitude']
         area = ''
 
         try:           
@@ -549,48 +567,46 @@ class TGInformer:
     def Rand_distance(self,Geo:dict)->dict:
         """
         随机的移动经纬度坐标
+        环绕初始经纬度周围 50 公里
         """
 
+        # test 类型（跳过遍历）
         if self.ENV['ENV'] == 'test':
             return None
-
+        
+        # 移动的距离
         num1 = (int(random.random()*10000))/1000
         lat_distance = num1 * 0.01 
-        signed = random.randint(-1,1)
         num2 = (int(random.random()*10000))/1000
         long_distance = num2 * 0.009
+        Geo['change_latitude'] += lat_distance
+        Geo['change_longitude'] += long_distance
+
+        # 移动的方向
+        signed1 = random.randint(-1,1)
+        signed2 = random.randint(-1,1)
         # 5~25 min
         time = int(random.random()*100 )/5 + 5
-
-        geo_move = {
-            'lat_distance':lat_distance,
-            'long_distance':long_distance,
-            'time' : time 
-        }
-
-        latitude = float(Geo['latitude']) + signed * geo_move['lat_distance']
-        longitude = float(Geo['longitude']) + geo_move['long_distance']
-
+        # 确定移动后的经纬度
+        latitude = float(Geo['latitude']) + signed1 * Geo['change_latitude']
+        longitude = float(Geo['longitude']) + signed2 * Geo['change_longitude']
         # 修正纬度（-90~+90）
-        if latitude > 90 :
-            return None
-        elif latitude < -90:
-            return None
-
+        if latitude >= 90 or latitude <= -90:
+            latitude = float(Geo['latitude']) + (-1)* signed1 * Geo['change_latitude']
         # 修正经度（-180~+180）
         if longitude > 180:
             longitude = longitude - 360
 
-        # 环球一圈即可停止
-        end_begin = float(Geo['beginlongitude']) - 1
-        if end_begin < -180:
-            end_begin = -180
-        if longitude < float(Geo['beginlongitude']) and longitude > end_begin:
+        # 返回值
+        Geo['move_latitude'] = '%.7f'%latitude
+        Geo['move_longitude'] = '%.6f'%longitude
+
+        # 指定在方圆 50 km 以内
+        coord_1 = (float(Geo['latitude']),float(Geo['longitude']))
+        coord_2 = (float(Geo['move_latitude']),float(Geo['move_longitude']))
+        distance = geodesic(coord_1, coord_2).km
+        if (distance > 50):
             return None
-        
-        Geo['latitude'] = '%.7f'%latitude
-        Geo['longitude'] = '%.6f'%longitude
-        Geo['time'] = geo_move['time']
         logging.info(f"Geo after move ({Geo})")
         return Geo
 
@@ -600,9 +616,9 @@ class TGInformer:
         @param geo: 给予的经纬度信息
         @param tag: 对于给定的经纬度的现实城市位置信息
         """
-        logging.info(f'begin geo:({Geo["latitude"]},{Geo["longitude"]}),area({area})')
-        latitude = Geo['latitude']
-        longitude = Geo['longitude']
+        logging.info(f'begin geo:({Geo["move_latitude"]},{Geo["move_longitude"]}),area({area})')
+        latitude = Geo['move_latitude']
+        longitude = Geo['move_longitude']
         geo_info = InputGeoPoint(
             lat=float(latitude),
             long=float(longitude),
