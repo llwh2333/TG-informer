@@ -587,6 +587,7 @@ class TGInformer:
         signed2 = random.randint(-1,1)
         # 5~25 min
         time = int(random.random()*100 )/5 + 5
+        Geo['time'] = time
         # 确定移动后的经纬度
         latitude = float(Geo['latitude']) + signed1 * Geo['change_latitude']
         longitude = float(Geo['longitude']) + signed2 * Geo['change_longitude']
